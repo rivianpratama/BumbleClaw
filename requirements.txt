@@ -1,0 +1,9 @@
+insightface
+onnx
+onnxruntime-gpu[cuda,cudnn]
+opencv-python
+scikit-learn
+numpy
+pillow
+tqdm
+gradio
