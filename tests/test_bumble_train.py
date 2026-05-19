@@ -33,7 +33,7 @@ class BumbleTrainTests(unittest.TestCase):
                         "timestamp": str(index),
                         "screenshot": name,
                         "method": "face_biased",
-                        "action": "right" if score >= 63.3 else "left",
+                        "action": "right" if score >= 62.34 else "left",
                         "score": str(score),
                         "face_biased": str(score),
                         "multimodal": str(score + 5),
@@ -48,7 +48,7 @@ class BumbleTrainTests(unittest.TestCase):
                 output=str(output),
                 target_count=8,
                 val_count=4,
-                threshold=63.3,
+                threshold=62.34,
                 seed=1,
                 crop_left=0.0,
                 crop_top=0.0,
@@ -116,7 +116,7 @@ class BumbleTrainTests(unittest.TestCase):
             write_csv(manifest, [row], bumble_train.SELECTION_FIELDS)
 
             bumble_train.evaluate_labels(
-                Namespace(labels=str(labels), manifest=str(manifest), split="validation", threshold=63.3, output=str(report))
+                Namespace(labels=str(labels), manifest=str(manifest), split="validation", threshold=62.34, output=str(report))
             )
 
             rows = list(csv.DictReader(report.open(encoding="utf-8")))
@@ -145,7 +145,7 @@ class BumbleTrainTests(unittest.TestCase):
                     manifest="unused.csv",
                     predictions=str(predictions),
                     split="validation",
-                    threshold=63.3,
+                    threshold=62.34,
                     output=str(report),
                 )
             )

@@ -78,7 +78,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Existing selection manifest to exclude from the new selection",
     )
-    prepare.add_argument("--threshold", type=float, default=63.3, help="Current swipe threshold")
+    prepare.add_argument("--threshold", type=float, default=62.34, help="Current swipe threshold")
     prepare.add_argument("--seed", type=int, default=42, help="Deterministic selection seed")
     prepare.add_argument("--crop-left", type=float, default=0.02, help="Photo crop left ratio")
     prepare.add_argument("--crop-top", type=float, default=0.06, help="Photo crop top ratio")
@@ -106,7 +106,7 @@ def parse_args() -> argparse.Namespace:
     evaluate.add_argument("--manifest", default=r"D:\BumbleTrain\manifests\selection.csv", help="Selection manifest")
     evaluate.add_argument("--predictions", help="Optional score.py CSV output to evaluate instead of logged manifest scores")
     evaluate.add_argument("--split", choices=("all", "train", "validation"), default="validation", help="Split to evaluate")
-    evaluate.add_argument("--threshold", type=float, default=63.3, help="Prediction swipe threshold")
+    evaluate.add_argument("--threshold", type=float, default=62.34, help="Prediction swipe threshold")
     evaluate.add_argument("--output", default=r"D:\BumbleTrain\reports\evaluation.csv", help="Evaluation report CSV")
     return parser.parse_args()
 
@@ -465,7 +465,7 @@ def balanced_train_rules(
         (
             "train_clear_right",
             train_count,
-            lambda candidate: candidate.score > 68.3,
+            lambda candidate: candidate.score > 67.34,
             lambda candidate: -candidate.score,
         ),
     ]
@@ -485,7 +485,7 @@ def swipe_recall_train_rules(
             "train_swipe_recall_55_70",
             train_count,
             lambda candidate: 55 <= candidate.score < 70,
-            lambda candidate: abs(candidate.score - 63.3),
+            lambda candidate: abs(candidate.score - 62.34),
         ),
         (
             "train_swipe_recall_45_55",
@@ -710,9 +710,9 @@ def normalize_label_row(row: dict[str, str], *, base_dir: Path | None = None) ->
 def score_band(score: float) -> str:
     if score < 45:
         return "low"
-    if score < 58.3:
+    if score < 57.34:
         return "mid_low"
-    if score <= 68.3:
+    if score <= 67.34:
         return "threshold"
     return "high"
 

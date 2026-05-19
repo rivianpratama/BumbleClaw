@@ -16,10 +16,10 @@ def config(*, loop: bool = False, delay: float | None = None) -> bumble_auto.Aut
         regressor_path=Path("model.joblib"),
         multimodal_regressor_path=Path("multimodal.joblib"),
         method="face_biased",
-        face_weight=0.5,
+        face_weight=0.22,
         k=11,
         provider="auto",
-        threshold=60.0,
+        threshold=62.34,
         loop=loop,
         delay=delay,
         profile_dir=Path(".bumble_browser"),
@@ -78,8 +78,8 @@ class FakePage:
 
 class BumbleAutoTests(unittest.TestCase):
     def test_decision_key_uses_left_below_threshold_otherwise_right(self) -> None:
-        self.assertEqual(bumble_auto.decision_key(63.2), "ArrowLeft")
-        self.assertEqual(bumble_auto.decision_key(63.3), "ArrowRight")
+        self.assertEqual(bumble_auto.decision_key(62.33), "ArrowLeft")
+        self.assertEqual(bumble_auto.decision_key(62.34), "ArrowRight")
         self.assertEqual(bumble_auto.decision_key(100.0), "ArrowRight")
 
     def test_parse_args_requires_delay_for_loop(self) -> None:
@@ -101,7 +101,7 @@ class BumbleAutoTests(unittest.TestCase):
         store = SimpleNamespace()
 
         prediction = RatingPrediction(
-            rating=60.0,
+            rating=62.34,
             method="face_biased",
             face_rating=45.0,
             multimodal_rating=55.0,
@@ -119,7 +119,7 @@ class BumbleAutoTests(unittest.TestCase):
                 )
 
         self.assertIsNone(result.stop_reason)
-        self.assertEqual(result.rating, 60.0)
+        self.assertEqual(result.rating, 62.34)
         self.assertEqual(result.screenshot, "logged.jpg")
         self.assertEqual(result.key, "ArrowRight")
         self.assertEqual(page.keyboard.pressed, ["ArrowRight"])

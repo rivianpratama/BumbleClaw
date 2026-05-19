@@ -18,10 +18,10 @@ def config(*, loop: bool = False, delay: float | None = None) -> bumble_phone_au
         regressor_path=Path("model.joblib"),
         multimodal_regressor_path=Path("multimodal.joblib"),
         method="face_biased",
-        face_weight=0.5,
+        face_weight=0.22,
         k=11,
         provider="auto",
-        threshold=60.0,
+        threshold=62.34,
         loop=loop,
         delay=delay,
         screenshot_path=Path("results/phone_current.png"),
@@ -38,8 +38,8 @@ def config(*, loop: bool = False, delay: float | None = None) -> bumble_phone_au
 
 class BumblePhoneAutoTests(unittest.TestCase):
     def test_decision_action_uses_left_below_threshold_otherwise_right(self) -> None:
-        self.assertEqual(bumble_phone_auto.decision_action(63.2), "left")
-        self.assertEqual(bumble_phone_auto.decision_action(63.3), "right")
+        self.assertEqual(bumble_phone_auto.decision_action(62.33), "left")
+        self.assertEqual(bumble_phone_auto.decision_action(62.34), "right")
         self.assertEqual(bumble_phone_auto.decision_action(100.0), "right")
 
     def test_parse_args_requires_delay_for_loop(self) -> None:

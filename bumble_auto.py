@@ -24,7 +24,7 @@ BUMBLE_URL = "https://bumble.com/app"
 DEFAULT_STORE = "embeddings/reference_store.npz"
 DEFAULT_PROFILE_DIR = ".bumble_browser"
 DEFAULT_SCREENSHOT = "results/bumble_current.png"
-DEFAULT_THRESHOLD = 63.3
+DEFAULT_THRESHOLD = 62.34
 BELL = "\a"
 
 QUOTA_PROMPTS = (
@@ -211,6 +211,18 @@ def score_screenshot(
     )
 
 
+def log_config(config: AutomationConfig) -> dict[str, object]:
+    return {
+        "store_path": config.store_path,
+        "regressor_path": config.regressor_path,
+        "multimodal_regressor_path": config.multimodal_regressor_path,
+        "threshold": config.threshold,
+        "face_weight": config.face_weight,
+        "k": config.k,
+        "provider": config.provider,
+    }
+
+
 def perform_iteration(
     page: Any,
     store: ReferenceStore,
@@ -275,6 +287,7 @@ def perform_iteration(
                 quality=config.log_quality,
                 max_width=config.log_max_width,
                 image_format=config.log_format,
+                config=log_config(config),
             )
             page.keyboard.press(key)
             return IterationResult(
@@ -303,6 +316,7 @@ def perform_iteration(
         quality=config.log_quality,
         max_width=config.log_max_width,
         image_format=config.log_format,
+        config=log_config(config),
     )
     if score_signature == previous_score_signature:
         return IterationResult(

@@ -21,6 +21,8 @@ class AppTests(unittest.TestCase):
             regressor_name="ridge",
             multimodal_rating=None,
             multimodal_name="Not trained",
+            original_face_biased=None,
+            round1_face_biased=None,
             max_similarity=0.7,
         )
 

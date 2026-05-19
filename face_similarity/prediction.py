@@ -9,8 +9,8 @@ from face_similarity.regressor import RatingRegressor, predict_multimodal_rating
 from face_similarity.scoring import score_embedding
 from face_similarity.store import ReferenceStore
 
-DEFAULT_MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal.joblib"
-DEFAULT_FACE_BIAS_WEIGHT = 0.50
+DEFAULT_MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal_bumble_combined_round2.joblib"
+DEFAULT_FACE_BIAS_WEIGHT = 0.22
 PREDICTION_METHODS = ("face_biased", "multimodal", "regressor", "knn")
 
 

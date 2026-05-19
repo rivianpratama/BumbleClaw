@@ -9,7 +9,6 @@ import gradio as gr
 from face_similarity.clip_embedding import get_clip_embedding
 from face_similarity.embedding import get_face_embedding
 from face_similarity.regressor import (
-    DEFAULT_REGRESSOR_PATH,
     load_regressor,
     predict_multimodal_rating,
     predict_rating,
@@ -17,11 +16,17 @@ from face_similarity.regressor import (
 from face_similarity.scoring import score_embedding
 from face_similarity.store import load_store
 
-STORE_PATH = "embeddings/reference_store.npz"
-REGRESSOR_PATH = DEFAULT_REGRESSOR_PATH
-MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal.joblib"
+STORE_PATH = "embeddings/reference_store_bumble_combined_round2.npz"
+REGRESSOR_PATH = "models/rating_regressor_bumble_combined_round2.joblib"
+MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal_bumble_combined_round2.joblib"
+ORIGINAL_REGRESSOR_PATH = "models/rating_regressor.joblib"
+ORIGINAL_MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal.joblib"
+ROUND1_REGRESSOR_PATH = "models/rating_regressor_bumble_combined.joblib"
+ROUND1_MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal_bumble_combined.joblib"
 TOP_K = 20
-BIASED_FACE_WEIGHT = 0.50
+BIASED_FACE_WEIGHT = 0.22
+COMPARISON_FACE_WEIGHT = 0.50
+SWIPE_THRESHOLD = 62.34
 SERVER_PORT = int(os.environ.get("BUMBLECLAW_PORT", "7860"))
 
 CSS = """
@@ -56,7 +61,7 @@ body {
 
 #score-panel {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 10px;
 }
 
@@ -98,6 +103,14 @@ body {
 
 .score-compare.primary {
     color: #1f5132;
+}
+
+.score-compare.right {
+    color: #1f5132;
+}
+
+.score-compare.left {
+    color: #6f251c;
 }
 
 .score-error {
@@ -176,6 +189,7 @@ def analyze(image_path: str) -> tuple[str, str]:
             regressor_text = regressor.model_name
         multimodal_text = "Not trained"
         multimodal_rating = None
+        clip_embedding = None
         multimodal = cached_regressor(MULTIMODAL_REGRESSOR_PATH)
         if multimodal is not None:
             try:
@@ -189,6 +203,18 @@ def analyze(image_path: str) -> tuple[str, str]:
                 multimodal_text = multimodal.model_name
             except Exception:
                 multimodal_text = "Unavailable"
+        original_face_biased = comparison_face_biased_score(
+            embedding,
+            clip_embedding,
+            face_regressor_path=ORIGINAL_REGRESSOR_PATH,
+            multimodal_regressor_path=ORIGINAL_MULTIMODAL_REGRESSOR_PATH,
+        )
+        round1_face_biased = comparison_face_biased_score(
+            embedding,
+            clip_embedding,
+            face_regressor_path=ROUND1_REGRESSOR_PATH,
+            multimodal_regressor_path=ROUND1_MULTIMODAL_REGRESSOR_PATH,
+        )
     except Exception as exc:
         return error_scores(str(exc)), ""
 
@@ -212,6 +238,8 @@ def analyze(image_path: str) -> tuple[str, str]:
             regressor_name=regressor_text,
             multimodal_rating=multimodal_rating,
             multimodal_name=multimodal_text,
+            original_face_biased=original_face_biased,
+            round1_face_biased=round1_face_biased,
             max_similarity=result.max_similarity,
         ),
         details,
@@ -231,12 +259,27 @@ def cached_regressor(path: str):
 
 
 def empty_scores() -> str:
-    return """
+    return f"""
     <div id="score-panel">
+      <div class="score-card">
+        <div class="score-label">Decision</div>
+        <div class="score-value">--</div>
+        <div class="score-meta">Threshold {SWIPE_THRESHOLD:.2f}</div>
+      </div>
       <div class="score-card">
         <div class="score-label">Face-Biased</div>
         <div class="score-value">--</div>
-        <div class="score-meta">50% Ridge + 50% multi</div>
+        <div class="score-meta">22% Ridge + 78% multi</div>
+      </div>
+      <div class="score-card">
+        <div class="score-label">7k Face-Bias</div>
+        <div class="score-value">--</div>
+        <div class="score-meta">22% Ridge + 78% multi</div>
+      </div>
+      <div class="score-card">
+        <div class="score-label">R1 Face-Bias</div>
+        <div class="score-value">--</div>
+        <div class="score-meta">22% Ridge + 78% multi</div>
       </div>
       <div class="score-card">
         <div class="score-label">Multimodal</div>
@@ -268,6 +311,8 @@ def score_cards(
     regressor_name: str,
     multimodal_rating: float | None,
     multimodal_name: str,
+    original_face_biased: float | None,
+    round1_face_biased: float | None,
     max_similarity: float,
 ) -> str:
     ridge_value = "--" if regressor_rating is None else f"{regressor_rating:.1f}"
@@ -275,15 +320,38 @@ def score_cards(
     biased_rating = biased_multimodal_score(regressor_rating, multimodal_rating)
     biased_value = "--" if biased_rating is None else f"{biased_rating:.1f}"
     biased_compare = comparison_text(biased_rating, regressor_rating)
+    decision_value, decision_compare, decision_class = decision_text(biased_rating)
+    original_value = "--" if original_face_biased is None else f"{original_face_biased:.1f}"
+    round1_value = "--" if round1_face_biased is None else f"{round1_face_biased:.1f}"
+    original_compare = comparison_text(original_face_biased, biased_rating)
+    round1_compare = comparison_text(round1_face_biased, biased_rating)
     multimodal_compare = comparison_text(multimodal_rating, regressor_rating)
     knn_compare = comparison_text(knn_rating, regressor_rating)
     return f"""
     <div id="score-panel">
       <div class="score-card">
+        <div class="score-label">Decision</div>
+        <div class="score-value">{decision_value}</div>
+        <div class="score-meta">Threshold {SWIPE_THRESHOLD:.2f}</div>
+        <div class="score-compare {decision_class}">{decision_compare}</div>
+      </div>
+      <div class="score-card">
         <div class="score-label">Face-Biased</div>
         <div class="score-value">{biased_value}</div>
         <div class="score-meta">{BIASED_FACE_WEIGHT:.0%} Ridge + {1 - BIASED_FACE_WEIGHT:.0%} multi</div>
         <div class="score-compare">{biased_compare}</div>
+      </div>
+      <div class="score-card">
+        <div class="score-label">7k Face-Bias</div>
+        <div class="score-value">{original_value}</div>
+        <div class="score-meta">22% Ridge + 78% multi</div>
+        <div class="score-compare">{original_compare}</div>
+      </div>
+      <div class="score-card">
+        <div class="score-label">R1 Face-Bias</div>
+        <div class="score-value">{round1_value}</div>
+        <div class="score-meta">22% Ridge + 78% multi</div>
+        <div class="score-compare">{round1_compare}</div>
       </div>
       <div class="score-card">
         <div class="score-label">Multimodal</div>
@@ -318,6 +386,32 @@ def biased_multimodal_score(
     return face_weight * regressor_rating + (1 - face_weight) * multimodal_rating
 
 
+def comparison_face_biased_score(
+    embedding,
+    clip_embedding,
+    *,
+    face_regressor_path: str,
+    multimodal_regressor_path: str,
+) -> float | None:
+    if clip_embedding is None:
+        return None
+    face_regressor = cached_regressor(face_regressor_path)
+    multimodal_regressor = cached_regressor(multimodal_regressor_path)
+    if face_regressor is None or multimodal_regressor is None:
+        return None
+    face_rating = predict_rating(face_regressor, embedding)
+    multimodal_rating = predict_multimodal_rating(
+        multimodal_regressor,
+        face_embedding=embedding,
+        clip_embedding=clip_embedding,
+    )
+    return biased_multimodal_score(
+        face_rating,
+        multimodal_rating,
+        face_weight=COMPARISON_FACE_WEIGHT,
+    )
+
+
 def comparison_text(score: float | None, ridge_score: float | None) -> str:
     if score is None or ridge_score is None:
         return "no comparison"
@@ -326,6 +420,14 @@ def comparison_text(score: float | None, ridge_score: float | None) -> str:
         return "same as Ridge"
     sign = "+" if delta > 0 else "-"
     return f"{sign}{abs(delta):.1f} vs Ridge"
+
+
+def decision_text(score: float | None) -> tuple[str, str, str]:
+    if score is None:
+        return "--", "no score", ""
+    if score >= SWIPE_THRESHOLD:
+        return "RIGHT", f"+{score - SWIPE_THRESHOLD:.1f} over threshold", "right"
+    return "LEFT", f"{SWIPE_THRESHOLD - score:.1f} under threshold", "left"
 
 
 with gr.Blocks(title="BumbleClaw") as demo:

@@ -23,7 +23,7 @@ from face_similarity.warnings import suppress_known_third_party_warnings
 
 DEFAULT_STORE = "embeddings/reference_store.npz"
 DEFAULT_SCREENSHOT = "results/phone_current.png"
-DEFAULT_THRESHOLD = 63.3
+DEFAULT_THRESHOLD = 62.34
 BELL = "\a"
 
 
@@ -205,6 +205,18 @@ def score_screenshot(
     )
 
 
+def log_config(config: PhoneAutomationConfig) -> dict[str, object]:
+    return {
+        "store_path": config.store_path,
+        "regressor_path": config.regressor_path,
+        "multimodal_regressor_path": config.multimodal_regressor_path,
+        "threshold": config.threshold,
+        "face_weight": config.face_weight,
+        "k": config.k,
+        "provider": config.provider,
+    }
+
+
 def perform_iteration(
     config: PhoneAutomationConfig,
     store: ReferenceStore,
@@ -237,6 +249,7 @@ def perform_iteration(
             quality=config.log_quality,
             max_width=config.log_max_width,
             image_format=config.log_format,
+            config=log_config(config),
         )
         if score_signature == previous_score_signature:
             return IterationResult(
@@ -280,6 +293,7 @@ def perform_iteration(
                 quality=config.log_quality,
                 max_width=config.log_max_width,
                 image_format=config.log_format,
+                config=log_config(config),
             )
             swipe_phone(config, action)
             return IterationResult(
