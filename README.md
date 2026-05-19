@@ -43,7 +43,14 @@ Use ratings from `0` to `100`. Include both high and low examples so the rating 
 
 ## Label A Large Dataset
 
-Use the separate labeling app for the dataset folders at `references/Female Faces` and `references/women`:
+Use the separate labeling app for the configured dataset folders:
+
+- `references/Female Faces`
+- `references/women`
+- `references/archive (4)/Data_all`
+- `references/Selfie`
+- `references/Selfie-version2`
+- `references/Kpop_Profile_curated`
 
 ```powershell
 python label_app.py
@@ -77,6 +84,26 @@ Rating scale:
 ```
 
 The app resumes at the next unlabeled image when reopened.
+
+## Clean Selfie Gender
+
+Quarantine male-predicted selfie images before labeling:
+
+```powershell
+python gender_cleanup.py --source-dir .\references\Selfie --provider cuda --det-thresh 0.25
+```
+
+This moves male predictions into `references/Selfie_removed_men` and writes `results/selfie_gender_cleanup.csv`. Use `--dry-run` first if you only want the report.
+
+## Curate K-pop Profile Candidates
+
+Copy a balanced manual-label subset from the Bumble-like K-pop dataset:
+
+```powershell
+python kpop_profile_curate.py --source-dir "D:\KPOP dataset" --output-dir references\Kpop_Profile_curated --report results\kpop_profile_curate.csv --provider cuda --det-thresh 0.25 --target-count 400 --max-per-identity 14
+```
+
+This writes `results/kpop_profile_curate.csv` and copies selected images into `references/Kpop_Profile_curated`.
 
 ## Build Embeddings
 
@@ -115,7 +142,82 @@ python score.py .\test_images\photo.jpg
 python score.py .\test_images --csv results\scores.csv
 ```
 
-The scorer uses the nearest 11 reference faces by default. Change that with `--k`.
+The scorer uses the nearest 20 reference faces by default. Change that with `--k`.
+
+## Train A Rating Regressor
+
+After building `embeddings/reference_store.npz`, train a supervised model from the face embeddings:
+
+```powershell
+python train_regressor.py
+```
+
+This compares Ridge, RandomForest, and HistGradientBoosting regressors, saves the best model to `models/rating_regressor.joblib`, and writes metrics to `results/regressor_eval.csv`.
+
+Use the trained regressor from the command line:
+
+```powershell
+python score.py .\test_images --method regressor
+python score.py .\test_images\photo.jpg --method regressor
+```
+
+The local Gradio UI automatically uses `models/rating_regressor.joblib` when it exists, while still showing nearest reference faces for debugging.
+
+## Test CLIP + Face Multimodal Scoring
+
+CLIP/PyTorch is large. If your repo and default venv are on `C:`, create a separate venv on a drive with enough free space, for example:
+
+```powershell
+D:
+python -m venv D:\BumbleClawClipVenv
+D:\BumbleClawClipVenv\Scripts\activate
+cd C:\Users\Rivian\Documents\GitHub\BumbleClaw
+pip install -r requirements.txt
+pip install -r requirements-clip.txt
+```
+
+Build CLIP embeddings aligned to the current face store:
+
+```powershell
+python build_clip_store.py --labels dataset_labels.csv --store embeddings\reference_store.npz --output embeddings\clip_store.npz --provider cuda
+```
+
+Train and compare face-only, CLIP-only, and combined models:
+
+```powershell
+python train_multimodal_regressor.py `
+  --face-store embeddings\reference_store.npz `
+  --clip-store embeddings\clip_store.npz `
+  --output models\rating_regressor_multimodal.joblib `
+  --report results\multimodal_regressor_eval.csv
+```
+
+The report includes both random validation and leak-aware validation. Keep the original Ridge model as the trusted default unless the multimodal model beats it on leak-aware MAE/RMSE.
+
+For a small smoke test:
+
+```powershell
+python build_clip_store.py --labels dataset_labels.csv --store embeddings\reference_store.npz --output embeddings\clip_store_smoke.npz --provider auto --limit 5
+```
+
+## Audit And Normalize Label Conflicts
+
+Find very similar faces with conflicting labels:
+
+```powershell
+python label_audit.py
+python label_audit.py --min-gap 50 --min-similarity 0.9
+```
+
+Create a separate model-building CSV that averages labels within high-similarity face groups:
+
+```powershell
+python normalize_labels.py --similarity-threshold 0.9
+python build_references.py --labels dataset_labels_normalized.csv --output embeddings\reference_store_normalized.npz --provider cuda --det-thresh 0.25
+python train_regressor.py --store embeddings\reference_store_normalized.npz --output models\rating_regressor_normalized.joblib --report results\regressor_eval_normalized.csv
+```
+
+This does not modify `dataset_labels.csv`.
 
 ## Local UI
 

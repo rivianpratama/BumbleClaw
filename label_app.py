@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import random
 from pathlib import Path
 import socket
@@ -12,6 +13,10 @@ from face_similarity.labeling import discover_images, labeled_paths, next_unlabe
 SOURCE_DIRS = [
     Path("references") / "Female Faces",
     Path("references") / "women",
+    Path("references") / "archive (4)" / "Data_all",
+    Path("references") / "Selfie",
+    Path("references") / "Selfie-version2",
+    Path("references") / "Kpop_Profile_curated",
 ]
 OUTPUT_CSV = Path("dataset_labels.csv")
 SERVER_PORT = 7861
@@ -231,6 +236,27 @@ body,
 """
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Mobile-friendly 1-5 image labeling app.")
+    parser.add_argument(
+        "--source-dir",
+        action="append",
+        dest="source_dirs",
+        help="Image folder to label. Repeat for multiple folders. Defaults to the reference dataset folders.",
+    )
+    parser.add_argument("--output-csv", default=str(OUTPUT_CSV), help="CSV to write labels into")
+    parser.add_argument("--port", type=int, default=SERVER_PORT, help="Gradio server port")
+    return parser.parse_args()
+
+
+def configure(*, source_dirs: list[str] | None = None, output_csv: str | Path = OUTPUT_CSV, port: int = SERVER_PORT) -> None:
+    global SOURCE_DIRS, OUTPUT_CSV, SERVER_PORT
+    if source_dirs:
+        SOURCE_DIRS = [Path(path) for path in source_dirs]
+    OUTPUT_CSV = Path(output_csv)
+    SERVER_PORT = port
+
+
 def initialize() -> tuple[dict[str, Any], str | None, str, str]:
     paths = discover_all_images(SOURCE_DIRS)
     labels = labeled_paths(OUTPUT_CSV)
@@ -333,6 +359,10 @@ def print_lan_urls(port: int) -> None:
     print()
 
 
+def allowed_paths() -> list[str]:
+    return [str(path.resolve()) for path in SOURCE_DIRS if path.exists()]
+
+
 with gr.Blocks(title="Dataset Labeler") as demo:
     app_state = gr.State()
     image_output = gr.Image(label=None, interactive=False, elem_id="image-output")
@@ -362,5 +392,7 @@ with gr.Blocks(title="Dataset Labeler") as demo:
 
 
 if __name__ == "__main__":
+    cli_args = parse_args()
+    configure(source_dirs=cli_args.source_dirs, output_csv=cli_args.output_csv, port=cli_args.port)
     print_lan_urls(SERVER_PORT)
-    demo.launch(server_name="0.0.0.0", server_port=SERVER_PORT, share=False, css=MOBILE_CSS)
+    demo.launch(server_name="0.0.0.0", server_port=SERVER_PORT, share=False, css=MOBILE_CSS, allowed_paths=allowed_paths())

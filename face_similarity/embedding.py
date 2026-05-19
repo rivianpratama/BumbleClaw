@@ -4,6 +4,7 @@ from functools import lru_cache
 import os
 from pathlib import Path
 import site
+import sys
 import tempfile
 from typing import Any
 
@@ -158,10 +159,15 @@ def _import_cv2() -> Any:
 
 
 def _import_insightface() -> Any:
+    add_nvidia_dll_directories()
     try:
         import insightface
     except ImportError as exc:
-        raise ImportError("insightface is required. Run: pip install -r requirements.txt") from exc
+        raise ImportError(
+            "Could not import insightface or one of its dependencies. "
+            "Run: pip install -r requirements.txt. "
+            f"Original error: {exc}"
+        ) from exc
     return insightface
 
 
@@ -183,6 +189,9 @@ def add_nvidia_dll_directories() -> None:
     for package_root in site.getsitepackages():
         nvidia_root = Path(package_root) / "nvidia"
         candidates.extend(nvidia_root.glob("*\\bin"))
+    venv_root = Path(sys.executable).resolve().parents[1]
+    candidates.extend((venv_root / "Lib" / "site-packages" / "nvidia").glob("*\\bin"))
+    candidates.append(venv_root / "Lib" / "site-packages" / "torch" / "lib")
 
     existing_path = os.environ.get("PATH", "")
     existing_parts = existing_path.split(os.pathsep) if existing_path else []

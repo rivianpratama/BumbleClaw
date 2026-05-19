@@ -12,6 +12,7 @@ references/
 test_images/
 embeddings/
 results/
+.bumble_browser/
 
 *.jpg
 *.jpeg

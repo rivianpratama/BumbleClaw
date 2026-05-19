@@ -1,9 +1,10 @@
 insightface
 onnx
-onnxruntime-gpu[cuda,cudnn]
+onnxruntime-gpu[cuda,cudnn]==1.20.1
 opencv-python
-scikit-learn
 numpy
+scikit-learn
 pillow
 tqdm
 gradio
+playwright

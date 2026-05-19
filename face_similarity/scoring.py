@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 @dataclass(frozen=True)
@@ -31,8 +30,8 @@ def score_embedding(
     if k < 1:
         raise ValueError("k must be at least 1")
 
-    query = np.asarray(embedding, dtype=np.float32).reshape(1, -1)
-    similarities = cosine_similarity(query, reference_embeddings)[0]
+    query = np.asarray(embedding, dtype=np.float32).reshape(-1)
+    similarities = cosine_similarities(query, reference_embeddings)
     top_count = min(k, len(similarities))
     top_indices = np.argsort(similarities)[-top_count:][::-1]
     top_similarities = similarities[top_indices]
@@ -53,3 +52,12 @@ def score_embedding(
         nearest_similarities=[float(score) for score in top_similarities],
     )
 
+
+def cosine_similarities(query: np.ndarray, reference_embeddings: np.ndarray) -> np.ndarray:
+    query_norm = float(np.linalg.norm(query))
+    reference_norms = np.linalg.norm(reference_embeddings, axis=1)
+    denominator = query_norm * reference_norms
+    similarities = np.zeros(len(reference_embeddings), dtype=np.float32)
+    valid = denominator > 0
+    similarities[valid] = np.dot(reference_embeddings[valid], query) / denominator[valid]
+    return similarities
