@@ -11,22 +11,44 @@ type ScoreData = {
   scoreDistribution: Record<string, number>;
   velocity: number;
   latest: { score: number | null; face_biased: number | null; multimodal: number | null; ridge: number | null; knn: number | null; action: string | null; method: string | null; divergence: number | null; screenshot: string | null; } | null;
+  dynamicThreshold: {
+    enabled: boolean;
+    active: boolean;
+    threshold: number;
+    rawThreshold: number | null;
+    fallbackThreshold: number;
+    targetRightRate: number;
+    window: number;
+    minHistory: number;
+    minThreshold: number;
+    maxThreshold: number;
+    historyCount: number;
+    projectedRightCount: number;
+    projectedRightPercent: number;
+    actualLeftCount: number;
+    actualRightCount: number;
+    actualRightPercent: number;
+  };
+  trend?: { time: number; threshold: number; score: number | null; action: string | null }[];
   records: number;
 };
 
 export default function Dashboard() {
   const [data, setData] = useState<ScoreData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sessionOffset, setSessionOffset] = useState<number>(0);
-  const [viewMode, setViewMode] = useState<'all' | 'session'>('all');
-  const [totalRecords, setTotalRecords] = useState<number>(0);
-
-  useEffect(() => {
+  const [sessionOffset, setSessionOffset] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
     const savedOffset = localStorage.getItem('bumble_session_offset');
-    if (savedOffset) setSessionOffset(parseInt(savedOffset, 10));
+    return savedOffset ? parseInt(savedOffset, 10) : 0;
+  });
+  const [viewMode, setViewMode] = useState<'all' | 'session'>(() => {
+    if (typeof window === 'undefined') return 'all';
     const savedMode = localStorage.getItem('bumble_view_mode');
-    if (savedMode === 'session' || savedMode === 'all') setViewMode(savedMode);
-  }, []);
+    return savedMode === 'session' || savedMode === 'all' ? savedMode : 'all';
+  });
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [trendWindow, setTrendWindow] = useState<number>(30 * 60 * 1000);
+  const [currentTime, setCurrentTime] = useState<number>(() => typeof window === 'undefined' ? 1779344400000 : Date.now());
 
   const handleSetViewMode = (mode: 'all' | 'session') => {
     setViewMode(mode);
@@ -53,12 +75,21 @@ export default function Dashboard() {
           setTotalRecords(json.totalRecords);
           setError(null); 
         }
-      } catch (err: any) { setError(err.message); }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch data');
+      }
     };
     fetchData();
     const interval = setInterval(fetchData, 1000);
     return () => clearInterval(interval);
   }, [viewMode, sessionOffset]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const formatNumber = (num: number | null | undefined) => num === null || num === undefined ? "--" : num.toFixed(2);
 
@@ -66,6 +97,7 @@ export default function Dashboard() {
   if (!data) return <div className="min-h-screen bg-[#050505] flex items-center justify-center p-8"><div className="w-12 h-12 border-4 border-white/10 border-t-purple-500 rounded-full animate-spin"></div></div>;
 
   const topMethods = Object.entries(data.methodDistribution).sort((a, b) => b[1] - a[1]);
+
 
   return (
     <main className="relative min-h-screen bg-[#050505] text-white overflow-x-hidden selection:bg-purple-500/30 font-sans p-6 lg:p-10 flex flex-col">
@@ -89,6 +121,10 @@ export default function Dashboard() {
             </h1>
           </div>
           <div className="flex flex-wrap gap-4 justify-end">
+            <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/5 backdrop-blur-md flex flex-col items-end justify-center hidden sm:flex">
+              <span className="text-gray-500 uppercase text-[9px] tracking-widest font-bold">Threshold</span>
+              <span className="text-amber-400 text-sm font-mono font-bold">{formatNumber(data.dynamicThreshold.threshold)}</span>
+            </div>
             <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/5 backdrop-blur-md flex flex-col items-end justify-center hidden sm:flex">
               <span className="text-gray-500 uppercase text-[9px] tracking-widest font-bold">Driver</span>
               <span className="text-indigo-400 text-sm font-bold uppercase">{topMethods[0]?.[0] || 'N/A'}</span>
@@ -126,7 +162,7 @@ export default function Dashboard() {
                 <div className="relative w-full flex-1 min-h-[600px] rounded-2xl overflow-hidden bg-black/50 border border-white/10 shadow-2xl">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img 
-                    src={`/api/image?file=${encodeURIComponent(data.latest.screenshot)}&t=${Date.now()}`} 
+                    src={`/api/image?file=${encodeURIComponent(data.latest.screenshot)}`} 
                     alt="Latest Profile"
                     className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-1000 group-hover:scale-[1.03]"
                   />
@@ -197,6 +233,7 @@ export default function Dashboard() {
                     </button>
                   </div>
                 </div>
+
                 <div className="flex justify-between items-end mb-4 relative z-10 gap-4">
                   <div className="flex flex-col flex-1">
                     <span className="text-rose-400 font-mono text-5xl font-bold">{data.swipes.leftPercent.toFixed(1)}%</span>
@@ -215,29 +252,230 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Score Distribution Bar Graph replacing Diagnostics */}
+              {/* Score Distribution Analytics */}
               <div className="bg-gradient-to-br from-blue-500/10 to-indigo-500/10 backdrop-blur-2xl border border-blue-500/20 rounded-3xl p-8 shadow-2xl relative flex flex-col justify-between">
                 <div>
                   <h2 className="text-blue-400/80 font-medium text-xs tracking-widest uppercase mb-4">Final Score Distribution</h2>
-                  <div className="flex items-end gap-3 h-40 mt-4 border-b border-white/10 pb-2">
+                  <div className="flex items-end gap-3 h-48 mt-4 pb-2">
                      {Object.entries(data.scoreDistribution || {}).map(([label, count]) => {
                         const maxCount = Math.max(...Object.values(data.scoreDistribution || {}), 1);
                         const heightPct = (count / maxCount) * 100;
                         return (
                           <div key={label} className="flex flex-col items-center flex-1 h-full justify-end group">
-                             <span className="text-xl text-gray-200 font-mono font-bold mb-2 transition-all duration-300">{count}</span>
+                             <span className="text-lg text-gray-200 font-mono font-bold mb-1 transition-all duration-300">{count}</span>
                              <div className="w-full bg-white/5 rounded-t-md relative flex items-end justify-center group-hover:bg-white/10 transition-colors" style={{ height: '100%' }}>
                                 <div className="w-full bg-gradient-to-t from-blue-600 to-indigo-400 rounded-t-md transition-all duration-1000" style={{ height: `${heightPct}%` }} />
                              </div>
-                             <span className="text-[8px] uppercase tracking-widest text-gray-400 mt-3">{label}</span>
+                             <span className="text-[8px] uppercase tracking-widest text-gray-400 mt-2">{label}</span>
                           </div>
                         )
                      })}
                   </div>
                 </div>
               </div>
-
             </div>
+
+            {/* Dynamic Threshold Trend - Spanning full width */}
+            {data.trend && data.trend.length > 0 && (
+              <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl flex flex-col gap-6">
+                <div className="flex justify-between items-center z-10 flex-wrap gap-4">
+                  <div>
+                    <h2 className="text-amber-400/85 font-medium text-xs tracking-widest uppercase mb-1">Dynamic Threshold Trend</h2>
+                    <p className="text-gray-400 text-[10px] uppercase tracking-wider font-semibold">Real-time sliding window calculations over the active timeframe</p>
+                  </div>
+                  <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                    {[
+                      { l: '1m', v: 60 * 1000 },
+                      { l: '5m', v: 5 * 60 * 1000 },
+                      { l: '30m', v: 30 * 60 * 1000 },
+                      { l: '1h', v: 60 * 60 * 1000 },
+                      { l: '6h', v: 6 * 60 * 60 * 1000 },
+                      { l: '12h', v: 12 * 60 * 60 * 1000 },
+                      { l: '1d', v: 24 * 60 * 60 * 1000 },
+                    ].map(opt => (
+                      <button 
+                        key={opt.l} 
+                        onClick={() => setTrendWindow(opt.v)}
+                        className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition-colors ${trendWindow === opt.v ? 'bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/30' : 'text-gray-500 hover:text-gray-300 border border-transparent'}`}
+                      >
+                        {opt.l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="relative h-48 w-full z-10 bg-black/40 rounded-xl border border-white/5 p-4 overflow-hidden flex gap-6">
+                  {(() => {
+                    const now = currentTime || (data.trend && data.trend.length > 0 ? data.trend[data.trend.length - 1].time : 1779344400000);
+                    const minTime = now - trendWindow;
+                    const filteredTrend = data.trend ? data.trend.filter(t => t.time >= minTime) : [];
+                    
+                    const currentVal = data.trend.length > 0 ? data.trend[data.trend.length - 1].threshold : 54;
+
+                    // Downsample the data into 80 time-based buckets (approx every 10px on a standard screen)
+                    const bucketCount = 80;
+                    const bucketWidth = trendWindow / bucketCount;
+                    const sampledTrend: typeof filteredTrend = [];
+                    
+                    for (let i = 0; i < bucketCount; i++) {
+                      const bucketStart = minTime + i * bucketWidth;
+                      const bucketEnd = bucketStart + bucketWidth;
+                      
+                      const pointsInBucket = filteredTrend.filter(t => t.time >= bucketStart && t.time < bucketEnd);
+                      if (pointsInBucket.length > 0) {
+                        sampledTrend.push(pointsInBucket[pointsInBucket.length - 1]);
+                      } else {
+                        const lastKnownPoint = filteredTrend.filter(t => t.time < bucketEnd).pop();
+                        if (lastKnownPoint) {
+                          sampledTrend.push({
+                            time: bucketEnd,
+                            threshold: lastKnownPoint.threshold,
+                            score: null,
+                            action: null
+                          });
+                        }
+                      }
+                    }
+
+                    // Fallback to a flat line at the current threshold if there's no data in the active timescale window
+                    const displayTrend = sampledTrend.length >= 2
+                      ? sampledTrend
+                      : [
+                          { time: minTime, threshold: currentVal, score: null, action: null },
+                          { time: now, threshold: currentVal, score: null, action: null }
+                        ];
+
+                    const thresholdValues = displayTrend.map(t => t.threshold);
+                    const maxThresholdVal = Math.max(...thresholdValues);
+                    const minThresholdVal = Math.min(...thresholdValues);
+
+                    // Zoom in tightly around the min and max threshold values of the timescale
+                    let minThreshold = Math.max(0, minThresholdVal - 2);
+                    let maxThreshold = Math.min(100, maxThresholdVal + 2);
+                    if (maxThreshold === minThreshold) {
+                      minThreshold = Math.max(0, minThreshold - 5);
+                      maxThreshold = Math.min(100, maxThreshold + 5);
+                    }
+
+                    const points = displayTrend.map((t) => {
+                      const x = Math.min(100, ((t.time - minTime) / trendWindow) * 100);
+                      const y = 100 - ((t.threshold - minThreshold) / (maxThreshold - minThreshold)) * 100;
+                      return `${x},${y}`;
+                    }).join(' ');
+
+                    const scorePoints = displayTrend.filter(t => t.score !== null).map((t) => {
+                      const x = Math.min(100, ((t.time - minTime) / trendWindow) * 100);
+                      const y = 100 - ((t.score! - minThreshold) / (maxThreshold - minThreshold)) * 100;
+                      return { x, y, action: t.action };
+                    });
+
+                    const firstX = Math.min(100, ((displayTrend[0].time - minTime) / trendWindow) * 100);
+                    const lastX = Math.min(100, ((displayTrend[displayTrend.length - 1].time - minTime) / trendWindow) * 100);
+                    const lastY = 100 - ((displayTrend[displayTrend.length - 1].threshold - minThreshold) / (maxThreshold - minThreshold)) * 100;
+                    const areaPath = `M ${firstX},100 L ${points} L ${lastX},100 Z`;
+
+                    // Stock market trend math
+                    const startVal = displayTrend[0].threshold;
+                    const isUpTrend = currentVal >= startVal;
+                    const strokeColor = isUpTrend ? '#10b981' : '#f43f5e';
+                    const gradientColor = isUpTrend ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)';
+                    const glowClass = isUpTrend ? 'drop-shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'drop-shadow-[0_0_6px_rgba(244,63,94,0.5)]';
+                    const nowColorClass = isUpTrend ? 'text-emerald-400' : 'text-rose-400';
+                    const nowLabelColorClass = isUpTrend ? 'text-emerald-500' : 'text-rose-500';
+
+                    return (
+                      <>
+                        {/* Left Indicators stack */}
+                        <div className="flex flex-col justify-between text-[11px] font-mono font-bold w-16 shrink-0 border-r border-white/5 pr-3 select-none">
+                          <div className="flex flex-col">
+                            <span className="text-[9px] uppercase tracking-wider text-white/40">Max</span>
+                            <span className="text-gray-300 font-mono text-xs">{maxThresholdVal.toFixed(1)}</span>
+                          </div>
+                          <div className="flex flex-col py-1">
+                            <span className={`text-[9px] uppercase tracking-wider ${nowLabelColorClass}`}>Now</span>
+                            <span className={`text-sm font-black font-mono ${nowColorClass}`}>{currentVal.toFixed(1)}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[9px] uppercase tracking-wider text-white/40">Min</span>
+                            <span className="text-gray-300 font-mono text-xs">{minThresholdVal.toFixed(1)}</span>
+                          </div>
+                        </div>
+
+                        {/* Right SVG Chart */}
+                        <div className="relative flex-1 h-full overflow-hidden flex items-end">
+                          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible absolute inset-0 py-2">
+                            <defs>
+                              <linearGradient id="threshold-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={gradientColor} />
+                                <stop offset="100%" stopColor="rgba(255, 255, 255, 0.0)" />
+                              </linearGradient>
+                            </defs>
+
+                            {/* Grid lines */}
+                            <line x1="0" y1="25" x2="100" y2="25" stroke="rgba(255,255,255,0.02)" strokeWidth="0.2" strokeDasharray="1,1" />
+                            <line x1="0" y1="50" x2="100" y2="50" stroke="rgba(255,255,255,0.05)" strokeWidth="0.2" />
+                            <line x1="0" y1="75" x2="100" y2="75" stroke="rgba(255,255,255,0.02)" strokeWidth="0.2" strokeDasharray="1,1" />
+                            
+                            {/* Area under the line */}
+                            <path d={areaPath} fill="url(#threshold-area-gradient)" />
+
+                            {/* Dynamic Threshold Line */}
+                            <polyline points={points} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" className={glowClass} />
+
+                            {/* Event Rug Plot at the very bottom margin */}
+                            {scorePoints.map((pt, i) => (
+                               <line 
+                                 key={i} 
+                                 x1={pt.x} 
+                                 y1="97" 
+                                 x2={pt.x} 
+                                 y2="100" 
+                                 stroke={pt.action === 'right' ? '#10b981' : pt.action === 'left' ? '#f43f5e' : '#4b5563'} 
+                                 strokeWidth="0.5"
+                                 opacity="0.25"
+                                 vectorEffect="non-scaling-stroke"
+                               />
+                            ))}
+                          </svg>
+
+                          {/* HTML Overlay to prevent vector stretching of text and dots */}
+                          <div className="absolute inset-0 py-2 pointer-events-none z-20">
+                            {/* Bloomberg-style horizontal grid labels */}
+                            <div className="absolute right-2 top-[25%] -translate-y-1/2 text-[9px] font-mono font-bold text-white/20 select-none">
+                              {(maxThreshold - (maxThreshold - minThreshold) * 0.25).toFixed(1)}
+                            </div>
+                            <div className="absolute right-2 top-[50%] -translate-y-1/2 text-[9px] font-mono font-bold text-white/20 select-none">
+                              {(maxThreshold - (maxThreshold - minThreshold) * 0.5).toFixed(1)}
+                            </div>
+                            <div className="absolute right-2 top-[75%] -translate-y-1/2 text-[9px] font-mono font-bold text-white/20 select-none">
+                              {(maxThreshold - (maxThreshold - minThreshold) * 0.75).toFixed(1)}
+                            </div>
+
+                            {/* Pulsing Live dot at the right edge */}
+                            <div 
+                              className="absolute -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full z-30 flex items-center justify-center"
+                              style={{ 
+                                left: `${lastX}%`, 
+                                top: `${lastY}%`
+                              }}
+                            >
+                              <span 
+                                className="absolute w-full h-full rounded-full opacity-100"
+                                style={{ backgroundColor: strokeColor, boxShadow: `0 0 10px ${strokeColor}` }}
+                              />
+                              <span 
+                                className="absolute w-full h-full rounded-full animate-ping opacity-75"
+                                style={{ border: `2px solid ${strokeColor}` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
 
             {/* Model Breakdown Grid */}
             <div className="flex flex-col gap-6">

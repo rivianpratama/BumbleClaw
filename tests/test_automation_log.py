@@ -37,7 +37,15 @@ class AutomationLogTests(unittest.TestCase):
                     "store_path": "embeddings/reference_store_bumble_combined_round2.npz",
                     "regressor_path": "models/rating_regressor_bumble_combined_round2.joblib",
                     "multimodal_regressor_path": "models/rating_regressor_multimodal_bumble_combined_round2.joblib",
-                    "threshold": 62.34,
+                    "threshold": 54.0,
+                    "dynamic_enabled": True,
+                    "dynamic_mode": "from_logs",
+                    "dynamic_window": 50,
+                    "dynamic_target_right_rate": 0.2,
+                    "dynamic_percentile": 80.0,
+                    "dynamic_min_history": 50,
+                    "dynamic_min_threshold": 48.0,
+                    "dynamic_max_threshold": 62.0,
                     "face_weight": 0.22,
                     "k": 11,
                     "provider": "cuda",
@@ -60,7 +68,15 @@ class AutomationLogTests(unittest.TestCase):
             self.assertEqual(rows[0]["knn"], "55.0000")
             self.assertEqual(rows[0]["regressor_path"], "models/rating_regressor_bumble_combined_round2.joblib")
             self.assertEqual(rows[0]["multimodal_regressor_path"], "models/rating_regressor_multimodal_bumble_combined_round2.joblib")
-            self.assertEqual(rows[0]["threshold"], "62.34")
+            self.assertEqual(rows[0]["threshold"], "54")
+            self.assertEqual(rows[0]["dynamic_enabled"], "True")
+            self.assertEqual(rows[0]["dynamic_mode"], "from_logs")
+            self.assertEqual(rows[0]["dynamic_window"], "50")
+            self.assertEqual(rows[0]["dynamic_target_right_rate"], "0.2")
+            self.assertEqual(rows[0]["dynamic_percentile"], "80")
+            self.assertEqual(rows[0]["dynamic_min_history"], "50")
+            self.assertEqual(rows[0]["dynamic_min_threshold"], "48")
+            self.assertEqual(rows[0]["dynamic_max_threshold"], "62")
             self.assertEqual(rows[0]["face_weight"], "0.22")
             self.assertEqual(rows[0]["k"], "11")
             self.assertEqual(rows[0]["provider"], "cuda")
@@ -109,7 +125,7 @@ class AutomationLogTests(unittest.TestCase):
                 prediction=prediction,
                 action="right",
                 log_dir=log_dir,
-                config={"threshold": 62.34},
+                config={"threshold": 54.0},
             )
 
             with (log_dir / "scores.csv").open(encoding="utf-8") as handle:
@@ -118,7 +134,7 @@ class AutomationLogTests(unittest.TestCase):
             self.assertEqual(reader.fieldnames, LOG_FIELDS)
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0]["threshold"], "")
-            self.assertEqual(rows[1]["threshold"], "62.34")
+            self.assertEqual(rows[1]["threshold"], "54")
 
 
 if __name__ == "__main__":

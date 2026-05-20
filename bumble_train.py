@@ -68,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     prepare.add_argument("--val-count", type=int, default=200, help="Locked validation image count")
     prepare.add_argument(
         "--selection-profile",
-        choices=("balanced", "swipe-recall"),
+        choices=("balanced", "swipe-recall", "calibration"),
         default="balanced",
         help="Candidate selection profile",
     )
@@ -78,7 +78,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Existing selection manifest to exclude from the new selection",
     )
-    prepare.add_argument("--threshold", type=float, default=62.34, help="Current swipe threshold")
+    prepare.add_argument("--threshold", type=float, default=54.0, help="Current swipe threshold")
     prepare.add_argument("--seed", type=int, default=42, help="Deterministic selection seed")
     prepare.add_argument("--crop-left", type=float, default=0.02, help="Photo crop left ratio")
     prepare.add_argument("--crop-top", type=float, default=0.06, help="Photo crop top ratio")
@@ -106,7 +106,7 @@ def parse_args() -> argparse.Namespace:
     evaluate.add_argument("--manifest", default=r"D:\BumbleTrain\manifests\selection.csv", help="Selection manifest")
     evaluate.add_argument("--predictions", help="Optional score.py CSV output to evaluate instead of logged manifest scores")
     evaluate.add_argument("--split", choices=("all", "train", "validation"), default="validation", help="Split to evaluate")
-    evaluate.add_argument("--threshold", type=float, default=62.34, help="Prediction swipe threshold")
+    evaluate.add_argument("--threshold", type=float, default=54.0, help="Prediction swipe threshold")
     evaluate.add_argument("--output", default=r"D:\BumbleTrain\reports\evaluation.csv", help="Evaluation report CSV")
     return parser.parse_args()
 
@@ -408,6 +408,8 @@ def select_candidates(
     train_count = target_count - val_count
     if profile == "swipe-recall":
         train_rules = swipe_recall_train_rules(train_count)
+    elif profile == "calibration":
+        train_rules = calibration_train_rules(train_count)
     else:
         train_rules = balanced_train_rules(train_count, threshold)
 
@@ -465,7 +467,7 @@ def balanced_train_rules(
         (
             "train_clear_right",
             train_count,
-            lambda candidate: candidate.score > 67.34,
+            lambda candidate: candidate.score > 59,
             lambda candidate: -candidate.score,
         ),
     ]
@@ -485,7 +487,7 @@ def swipe_recall_train_rules(
             "train_swipe_recall_55_70",
             train_count,
             lambda candidate: 55 <= candidate.score < 70,
-            lambda candidate: abs(candidate.score - 62.34),
+            lambda candidate: abs(candidate.score - 54),
         ),
         (
             "train_swipe_recall_45_55",
@@ -497,6 +499,37 @@ def swipe_recall_train_rules(
             "train_swipe_recall_disagreement_fill",
             train_count,
             lambda candidate: candidate.component_spread >= 15,
+            lambda candidate: -candidate.component_spread,
+        ),
+    ]
+
+
+def calibration_train_rules(
+    train_count: int,
+) -> list[tuple[str, int, Callable[[Candidate], bool], Callable[[Candidate], float]]]:
+    return [
+        (
+            "train_calibration_30_50",
+            round(train_count * 0.30),
+            lambda candidate: 30 <= candidate.score < 50,
+            lambda candidate: abs(candidate.score - 40),
+        ),
+        (
+            "train_calibration_50_60",
+            round(train_count * 0.25),
+            lambda candidate: 50 <= candidate.score < 60,
+            lambda candidate: abs(candidate.score - 54),
+        ),
+        (
+            "train_calibration_60_75",
+            round(train_count * 0.30),
+            lambda candidate: 60 <= candidate.score <= 75,
+            lambda candidate: abs(candidate.score - 67.5),
+        ),
+        (
+            "train_calibration_disagreement_fill",
+            train_count,
+            lambda candidate: 30 <= candidate.score <= 75 and candidate.component_spread >= 15,
             lambda candidate: -candidate.component_spread,
         ),
     ]
@@ -710,9 +743,9 @@ def normalize_label_row(row: dict[str, str], *, base_dir: Path | None = None) ->
 def score_band(score: float) -> str:
     if score < 45:
         return "low"
-    if score < 57.34:
+    if score < 49:
         return "mid_low"
-    if score <= 67.34:
+    if score <= 59:
         return "threshold"
     return "high"
 

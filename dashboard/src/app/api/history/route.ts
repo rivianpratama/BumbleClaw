@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
+import { getBumbleLogFilePath } from '@/lib/bumbleLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,7 @@ export async function GET(request: Request) {
   const limit = parseInt(searchParams.get('limit') || '50', 10);
   const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-  const filepath = 'D:\\BumbleLog\\scores.csv';
+  const filepath = getBumbleLogFilePath('scores.csv');
   try {
     const fileContent = fs.readFileSync(filepath, 'utf-8');
     const lines = fileContent.split('\n');
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Missing screenshot column' }, { status: 400 });
     }
 
-    let history = [];
+    const history = [];
     
     for (let i = lines.length - 1; i > 0; i--) {
       const line = lines[i].trim();
@@ -57,7 +58,8 @@ export async function GET(request: Request) {
       limit,
       offset
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

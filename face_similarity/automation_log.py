@@ -26,9 +26,19 @@ LOG_FIELDS = [
     "regressor_path",
     "multimodal_regressor_path",
     "threshold",
+    "dynamic_enabled",
+    "dynamic_mode",
+    "dynamic_window",
+    "dynamic_target_right_rate",
+    "dynamic_percentile",
+    "dynamic_min_history",
+    "dynamic_min_threshold",
+    "dynamic_max_threshold",
     "face_weight",
     "k",
     "provider",
+    "delay",
+    "mode_247",
 ]
 
 
@@ -133,9 +143,19 @@ def append_score_row(
                 "regressor_path": format_config(config.get("regressor_path")),
                 "multimodal_regressor_path": format_config(config.get("multimodal_regressor_path")),
                 "threshold": format_config(config.get("threshold")),
+                "dynamic_enabled": format_config(config.get("dynamic_enabled")),
+                "dynamic_mode": format_config(config.get("dynamic_mode")),
+                "dynamic_window": format_config(config.get("dynamic_window")),
+                "dynamic_target_right_rate": format_config(config.get("dynamic_target_right_rate")),
+                "dynamic_percentile": format_config(config.get("dynamic_percentile")),
+                "dynamic_min_history": format_config(config.get("dynamic_min_history")),
+                "dynamic_min_threshold": format_config(config.get("dynamic_min_threshold")),
+                "dynamic_max_threshold": format_config(config.get("dynamic_max_threshold")),
                 "face_weight": format_config(config.get("face_weight")),
                 "k": format_config(config.get("k")),
                 "provider": format_config(config.get("provider")),
+                "delay": format_config(config.get("delay")),
+                "mode_247": format_config(config.get("mode_247")),
             }
         )
 

@@ -33,7 +33,7 @@ class BumbleTrainTests(unittest.TestCase):
                         "timestamp": str(index),
                         "screenshot": name,
                         "method": "face_biased",
-                        "action": "right" if score >= 62.34 else "left",
+                        "action": "right" if score >= 54.0 else "left",
                         "score": str(score),
                         "face_biased": str(score),
                         "multimodal": str(score + 5),
@@ -48,7 +48,7 @@ class BumbleTrainTests(unittest.TestCase):
                 output=str(output),
                 target_count=8,
                 val_count=4,
-                threshold=62.34,
+                threshold=54.0,
                 seed=1,
                 crop_left=0.0,
                 crop_top=0.0,
@@ -65,6 +65,26 @@ class BumbleTrainTests(unittest.TestCase):
             self.assertEqual(sum(row["split"] == "validation" for row in manifest), 4)
             self.assertEqual(sum(row["split"] == "train" for row in manifest), 4)
             self.assertTrue((output / "raw" / "scores.csv").exists())
+
+    def test_calibration_profile_selects_low_boundary_high_and_disagreement(self) -> None:
+        candidates = []
+        for index, score in enumerate([32, 38, 45, 52, 56, 61, 68, 73, 34, 58, 75]):
+            candidates.append(candidate_for_score(score, index, spread=20 if index in {8, 9, 10} else 5))
+
+        selected = bumble_train.select_candidates(
+            candidates,
+            target_count=10,
+            val_count=0,
+            threshold=54.0,
+            seed=1,
+            profile="calibration",
+        )
+
+        reasons = [reason for _, reason, _ in selected]
+        self.assertEqual(reasons.count("train_calibration_30_50"), 3)
+        self.assertEqual(reasons.count("train_calibration_50_60"), 2)
+        self.assertEqual(reasons.count("train_calibration_60_75"), 3)
+        self.assertEqual(reasons.count("train_calibration_disagreement_fill"), 2)
 
     def test_combine_labels_excludes_validation_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,14 +136,14 @@ class BumbleTrainTests(unittest.TestCase):
             write_csv(manifest, [row], bumble_train.SELECTION_FIELDS)
 
             bumble_train.evaluate_labels(
-                Namespace(labels=str(labels), manifest=str(manifest), split="validation", threshold=62.34, output=str(report))
+                Namespace(labels=str(labels), manifest=str(manifest), split="validation", threshold=54.0, output=str(report))
             )
 
             rows = list(csv.DictReader(report.open(encoding="utf-8")))
             score_row = next(row for row in rows if row["metric"] == "score")
             self.assertEqual(score_row["count"], "1")
             self.assertEqual(score_row["mae"], "15.000000")
-            self.assertEqual(score_row["swipe_error_rate"], "1.000000")
+            self.assertEqual(score_row["swipe_error_rate"], "0.000000")
 
     def test_evaluate_prediction_csv_from_score_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -145,7 +165,7 @@ class BumbleTrainTests(unittest.TestCase):
                     manifest="unused.csv",
                     predictions=str(predictions),
                     split="validation",
-                    threshold=62.34,
+                    threshold=54.0,
                     output=str(report),
                 )
             )
@@ -203,6 +223,19 @@ def manifest_row(split: str, selected_path: Path) -> dict[str, str]:
         "component_spread": "0",
         "score_band": "high",
     }
+
+
+def candidate_for_score(score: float, index: int, *, spread: float) -> bumble_train.Candidate:
+    screenshot = f"profile_{index:02d}.webp"
+    return bumble_train.Candidate(
+        row={"screenshot": screenshot},
+        raw_path=Path(screenshot),
+        crop_path=Path(f"profile_{index:02d}.jpg"),
+        score=score,
+        component_spread=spread,
+        score_band=bumble_train.score_band(score),
+        image_hash=index,
+    )
 
 
 def write_csv(path: Path, rows: list[dict[str, str]], fieldnames: list[str]) -> None:

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
+import { constants, createReadStream } from 'node:fs';
+import { access } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import path from 'path';
+import { getBumbleLogFilePath } from '@/lib/bumbleLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,16 +15,16 @@ export async function GET(request: Request) {
     return new NextResponse('File missing', { status: 400 });
   }
 
-  // Prevent directory traversal by only taking the basename
   const safeFile = path.basename(file);
-  const filePath = path.join('D:\\BumbleLog', safeFile);
+  const filePath = getBumbleLogFilePath(safeFile);
 
   try {
-    if (!fs.existsSync(filePath)) {
+    try {
+      await access(filePath, constants.R_OK);
+    } catch {
       return new NextResponse('File not found', { status: 404 });
     }
 
-    const fileBuffer = fs.readFileSync(filePath);
     const ext = path.extname(safeFile).toLowerCase();
     
     let contentType = 'image/jpeg';
@@ -29,13 +32,16 @@ export async function GET(request: Request) {
     else if (ext === '.png') contentType = 'image/png';
     else if (ext === '.gif') contentType = 'image/gif';
 
-    return new NextResponse(fileBuffer, {
+    const stream = Readable.toWeb(createReadStream(filePath)) as ReadableStream;
+
+    return new NextResponse(stream, {
       headers: {
         'Content-Type': contentType,
         'Cache-Control': 'no-store, max-age=0',
       },
     });
-  } catch (err: any) {
-    return new NextResponse(err.message, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return new NextResponse(message, { status: 500 });
   }
 }
