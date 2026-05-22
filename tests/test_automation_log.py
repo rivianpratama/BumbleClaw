@@ -35,9 +35,12 @@ class AutomationLogTests(unittest.TestCase):
                 image_format="webp",
                 config={
                     "store_path": "embeddings/reference_store_bumble_combined_round2.npz",
+                    "setup_name": "Experimental1",
                     "regressor_path": "models/rating_regressor_bumble_combined_round2.joblib",
                     "multimodal_regressor_path": "models/rating_regressor_multimodal_bumble_combined_round2.joblib",
                     "threshold": 54.0,
+                    "decision_mode": "preference",
+                    "preference_probability": 0.612345,
                     "dynamic_enabled": True,
                     "dynamic_mode": "from_logs",
                     "dynamic_window": 50,
@@ -46,6 +49,14 @@ class AutomationLogTests(unittest.TestCase):
                     "dynamic_min_history": 50,
                     "dynamic_min_threshold": 48.0,
                     "dynamic_max_threshold": 62.0,
+                    "dynamic_preference_enabled": True,
+                    "dynamic_preference_mode": "from_logs",
+                    "dynamic_preference_window": 200,
+                    "dynamic_preference_target_right_rate": 0.2,
+                    "dynamic_preference_percentile": 80.0,
+                    "dynamic_preference_min_history": 50,
+                    "dynamic_preference_min_threshold": 0.45,
+                    "dynamic_preference_max_threshold": 0.75,
                     "face_weight": 0.22,
                     "k": 11,
                     "provider": "cuda",
@@ -61,7 +72,9 @@ class AutomationLogTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["screenshot"], output.name)
+            self.assertEqual(rows[0]["setup_name"], "Experimental1")
             self.assertEqual(rows[0]["score"], "60.0000")
+            self.assertEqual(rows[0]["final_score"], "61.2345")
             self.assertEqual(rows[0]["face_biased"], "65.6000")
             self.assertEqual(rows[0]["multimodal"], "70.0000")
             self.assertEqual(rows[0]["ridge"], "50.0000")
@@ -77,6 +90,14 @@ class AutomationLogTests(unittest.TestCase):
             self.assertEqual(rows[0]["dynamic_min_history"], "50")
             self.assertEqual(rows[0]["dynamic_min_threshold"], "48")
             self.assertEqual(rows[0]["dynamic_max_threshold"], "62")
+            self.assertEqual(rows[0]["dynamic_preference_enabled"], "True")
+            self.assertEqual(rows[0]["dynamic_preference_mode"], "from_logs")
+            self.assertEqual(rows[0]["dynamic_preference_window"], "200")
+            self.assertEqual(rows[0]["dynamic_preference_target_right_rate"], "0.2")
+            self.assertEqual(rows[0]["dynamic_preference_percentile"], "80")
+            self.assertEqual(rows[0]["dynamic_preference_min_history"], "50")
+            self.assertEqual(rows[0]["dynamic_preference_min_threshold"], "0.45")
+            self.assertEqual(rows[0]["dynamic_preference_max_threshold"], "0.75")
             self.assertEqual(rows[0]["face_weight"], "0.22")
             self.assertEqual(rows[0]["k"], "11")
             self.assertEqual(rows[0]["provider"], "cuda")
@@ -135,6 +156,7 @@ class AutomationLogTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0]["threshold"], "")
             self.assertEqual(rows[1]["threshold"], "54")
+            self.assertEqual(rows[1]["final_score"], "60.0000")
 
 
 if __name__ == "__main__":

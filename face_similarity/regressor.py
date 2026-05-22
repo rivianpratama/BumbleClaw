@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 
-DEFAULT_REGRESSOR_PATH = "models/rating_regressor_bumble_combined_round2.joblib"
+DEFAULT_REGRESSOR_PATH = "models/rating_regressor_bumble_combined_round3.joblib"
 
 
 @dataclass(frozen=True)

@@ -15,9 +15,11 @@ LOG_FORMATS = {"jpg", "jpeg", "webp", "avif"}
 LOG_FIELDS = [
     "timestamp",
     "screenshot",
+    "setup_name",
     "method",
     "action",
     "score",
+    "final_score",
     "face_biased",
     "multimodal",
     "ridge",
@@ -26,6 +28,10 @@ LOG_FIELDS = [
     "regressor_path",
     "multimodal_regressor_path",
     "threshold",
+    "decision_mode",
+    "preference_model_path",
+    "preference_threshold",
+    "preference_probability",
     "dynamic_enabled",
     "dynamic_mode",
     "dynamic_window",
@@ -34,6 +40,14 @@ LOG_FIELDS = [
     "dynamic_min_history",
     "dynamic_min_threshold",
     "dynamic_max_threshold",
+    "dynamic_preference_enabled",
+    "dynamic_preference_mode",
+    "dynamic_preference_window",
+    "dynamic_preference_target_right_rate",
+    "dynamic_preference_percentile",
+    "dynamic_preference_min_history",
+    "dynamic_preference_min_threshold",
+    "dynamic_preference_max_threshold",
     "face_weight",
     "k",
     "provider",
@@ -116,14 +130,15 @@ def append_score_row(
     output = Path(csv_path)
     ensure_csv_header(output)
     write_header = not output.exists()
+    config = config or {}
     face_biased = None
     if prediction.face_rating is not None and prediction.multimodal_rating is not None:
+        face_weight = parse_config_float(config.get("face_weight"), DEFAULT_FACE_BIAS_WEIGHT)
         face_biased = biased_multimodal_score(
             prediction.face_rating,
             prediction.multimodal_rating,
-            face_weight=DEFAULT_FACE_BIAS_WEIGHT,
+            face_weight=face_weight,
         )
-    config = config or {}
     with output.open("a", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=LOG_FIELDS)
         if write_header:
@@ -132,9 +147,11 @@ def append_score_row(
             {
                 "timestamp": timestamp,
                 "screenshot": screenshot_name,
+                "setup_name": format_config(config.get("setup_name")),
                 "method": prediction.method,
                 "action": action,
                 "score": format_score(prediction.rating),
+                "final_score": format_score(final_score(prediction, config)),
                 "face_biased": format_score(face_biased),
                 "multimodal": format_score(prediction.multimodal_rating),
                 "ridge": format_score(prediction.face_rating),
@@ -143,6 +160,10 @@ def append_score_row(
                 "regressor_path": format_config(config.get("regressor_path")),
                 "multimodal_regressor_path": format_config(config.get("multimodal_regressor_path")),
                 "threshold": format_config(config.get("threshold")),
+                "decision_mode": format_config(config.get("decision_mode")),
+                "preference_model_path": format_config(config.get("preference_model_path")),
+                "preference_threshold": format_config(config.get("preference_threshold")),
+                "preference_probability": format_config(config.get("preference_probability")),
                 "dynamic_enabled": format_config(config.get("dynamic_enabled")),
                 "dynamic_mode": format_config(config.get("dynamic_mode")),
                 "dynamic_window": format_config(config.get("dynamic_window")),
@@ -151,6 +172,14 @@ def append_score_row(
                 "dynamic_min_history": format_config(config.get("dynamic_min_history")),
                 "dynamic_min_threshold": format_config(config.get("dynamic_min_threshold")),
                 "dynamic_max_threshold": format_config(config.get("dynamic_max_threshold")),
+                "dynamic_preference_enabled": format_config(config.get("dynamic_preference_enabled")),
+                "dynamic_preference_mode": format_config(config.get("dynamic_preference_mode")),
+                "dynamic_preference_window": format_config(config.get("dynamic_preference_window")),
+                "dynamic_preference_target_right_rate": format_config(config.get("dynamic_preference_target_right_rate")),
+                "dynamic_preference_percentile": format_config(config.get("dynamic_preference_percentile")),
+                "dynamic_preference_min_history": format_config(config.get("dynamic_preference_min_history")),
+                "dynamic_preference_min_threshold": format_config(config.get("dynamic_preference_min_threshold")),
+                "dynamic_preference_max_threshold": format_config(config.get("dynamic_preference_max_threshold")),
                 "face_weight": format_config(config.get("face_weight")),
                 "k": format_config(config.get("k")),
                 "provider": format_config(config.get("provider")),
@@ -179,9 +208,36 @@ def format_score(value: float | None) -> str:
     return "" if value is None else f"{value:.4f}"
 
 
+def final_score(prediction: RatingPrediction, config: Mapping[str, object]) -> float:
+    if str(config.get("decision_mode", "")).lower() != "preference":
+        return prediction.rating
+    preference_probability = parse_optional_float(config.get("preference_probability"))
+    if preference_probability is None:
+        return prediction.rating
+    return preference_probability * 100.0
+
+
 def format_config(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, float):
         return f"{value:g}"
     return str(value)
+
+
+def parse_config_float(value: object, default: float) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_optional_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

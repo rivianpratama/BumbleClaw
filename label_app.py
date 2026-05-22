@@ -8,7 +8,7 @@ from typing import Any
 
 import gradio as gr
 
-from face_similarity.labeling import discover_images, labeled_paths, next_unlabeled_path, upsert_label
+from face_similarity.labeling import discover_images, labeled_paths, load_label_rows, next_unlabeled_path, upsert_label
 
 SOURCE_DIRS = [
     Path("references") / "Female Faces",
@@ -20,6 +20,7 @@ SOURCE_DIRS = [
 ]
 OUTPUT_CSV = Path("dataset_labels.csv")
 SERVER_PORT = 7861
+BINARY_MODE = False
 
 MOBILE_CSS = """
 :root {
@@ -235,6 +236,179 @@ body,
 }
 """
 
+BINARY_CSS = """
+:root {
+    --bg-color: #000000;
+    --text-primary: #ffffff;
+}
+
+html,
+body,
+.gradio-container {
+    width: 100% !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #000 !important;
+    overflow: hidden !important;
+}
+
+.gradio-container {
+    max-width: none !important;
+}
+
+footer,
+#binary-hidden,
+#binary-hidden * {
+    display: none !important;
+}
+
+#binary-stage {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #000 !important;
+    overflow: hidden !important;
+}
+
+#binary-image-output {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: #000 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+
+#binary-image-output .image-container,
+#binary-image-output img {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    object-fit: contain !important;
+    background: #000 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    pointer-events: none !important;
+}
+
+#binary-actions {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: max(28px, calc(env(safe-area-inset-bottom) + 22px)) !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 0 max(28px, calc(env(safe-area-inset-left) + 28px)) !important;
+    pointer-events: auto !important;
+}
+
+#binary-count {
+    position: fixed !important;
+    top: max(10px, calc(env(safe-area-inset-top) + 6px)) !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 9998 !important;
+    padding: 4px 9px !important;
+    border-radius: 999px !important;
+    background: rgba(0, 0, 0, 0.18) !important;
+    color: rgba(255, 255, 255, 0.68) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    pointer-events: none !important;
+    backdrop-filter: blur(8px) saturate(1.05) !important;
+    -webkit-backdrop-filter: blur(8px) saturate(1.05) !important;
+}
+
+#binary-count p {
+    margin: 0 !important;
+}
+
+#binary-actions > div,
+#binary-actions button,
+.binary-btn,
+.binary-btn button {
+    pointer-events: auto !important;
+}
+
+.binary-btn,
+.binary-btn button {
+    width: 86px !important;
+    height: 86px !important;
+    min-width: 86px !important;
+    min-height: 86px !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    background: rgba(0, 0, 0, 0.18) !important;
+    color: #fff !important;
+    font-size: 42px !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18) !important;
+    backdrop-filter: blur(8px) saturate(1.05) !important;
+    -webkit-backdrop-filter: blur(8px) saturate(1.05) !important;
+    touch-action: manipulation !important;
+}
+
+.binary-no,
+.binary-no button {
+    color: #ff453a !important;
+}
+
+.binary-like,
+.binary-like button {
+    color: #30d158 !important;
+}
+
+.binary-btn:active,
+.binary-btn button:active {
+    transform: scale(0.92) !important;
+}
+"""
+
+BINARY_KEYBOARD_JS = """
+() => {
+    if (window.bumbleBinaryKeyHandlerBound) {
+        return [];
+    }
+
+    window.bumbleBinaryKeyHandlerBound = true;
+    document.addEventListener("keydown", (event) => {
+        if (event.repeat) {
+            return;
+        }
+
+        const selector = event.key === "ArrowLeft"
+            ? ".binary-no button, button.binary-no"
+            : event.key === "ArrowRight"
+                ? ".binary-like button, button.binary-like"
+                : null;
+        if (!selector) {
+            return;
+        }
+
+        const button = document.querySelector(selector);
+        if (!button) {
+            return;
+        }
+
+        event.preventDefault();
+        button.click();
+    });
+    return [];
+}
+"""
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Mobile-friendly 1-5 image labeling app.")
@@ -246,15 +420,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-csv", default=str(OUTPUT_CSV), help="CSV to write labels into")
     parser.add_argument("--port", type=int, default=SERVER_PORT, help="Gradio server port")
+    parser.add_argument("--binary", action="store_true", help="Use fullscreen binary no/like labeling mode")
     return parser.parse_args()
 
 
-def configure(*, source_dirs: list[str] | None = None, output_csv: str | Path = OUTPUT_CSV, port: int = SERVER_PORT) -> None:
-    global SOURCE_DIRS, OUTPUT_CSV, SERVER_PORT
+def configure(
+    *,
+    source_dirs: list[str] | None = None,
+    output_csv: str | Path = OUTPUT_CSV,
+    port: int = SERVER_PORT,
+    binary: bool | None = None,
+) -> None:
+    global SOURCE_DIRS, OUTPUT_CSV, SERVER_PORT, BINARY_MODE
     if source_dirs:
         SOURCE_DIRS = [Path(path) for path in source_dirs]
     OUTPUT_CSV = Path(output_csv)
     SERVER_PORT = port
+    if binary is not None:
+        BINARY_MODE = binary
 
 
 def initialize() -> tuple[dict[str, Any], str | None, str, str]:
@@ -285,6 +468,29 @@ def rate_current(state: dict[str, Any] | None, rating_1_5: int) -> tuple[dict[st
     if current is not None:
         upsert_label(OUTPUT_CSV, current, rating_1_5)
     return render(state)
+
+
+def initialize_binary() -> tuple[dict[str, Any], str | None, str]:
+    state, image_path, _, _ = initialize()
+    return state, image_path, binary_count_text(state)
+
+
+def rate_current_binary(state: dict[str, Any] | None, rating_1_5: int) -> tuple[dict[str, Any], str | None, str]:
+    state, image_path, _, _ = rate_current(state, rating_1_5)
+    return state, image_path, binary_count_text(state)
+
+
+def binary_count_text(state: dict[str, Any]) -> str:
+    total = len(state.get("paths", []))
+    rows = load_label_rows(OUTPUT_CSV)
+    labeled = len(rows)
+    right = sum(1 for row in rows if row.rating_1_5 >= 4)
+    left = sum(1 for row in rows if row.rating_1_5 <= 2)
+    if labeled == 0:
+        return f"0 / {total} · R 0% · L 0%"
+    right_pct = round((right / labeled) * 100)
+    left_pct = round((left / labeled) * 100)
+    return f"{labeled} / {total} · R {right_pct}% · L {left_pct}%"
 
 
 def skip_current(state: dict[str, Any] | None) -> tuple[dict[str, Any], str | None, str, str]:
@@ -363,36 +569,62 @@ def allowed_paths() -> list[str]:
     return [str(path.resolve()) for path in SOURCE_DIRS if path.exists()]
 
 
-with gr.Blocks(title="Dataset Labeler") as demo:
-    app_state = gr.State()
-    image_output = gr.Image(label=None, interactive=False, elem_id="image-output")
+def create_demo() -> gr.Blocks:
+    with gr.Blocks(title="Dataset Labeler") as demo:
+        app_state = gr.State()
+        if BINARY_MODE:
+            with gr.Column(elem_id="binary-stage"):
+                image_output = gr.Image(label=None, interactive=False, elem_id="binary-image-output")
+                count_output = gr.Markdown(elem_id="binary-count")
+                with gr.Row(elem_id="binary-actions"):
+                    no_button = gr.Button("X", elem_classes=["binary-btn", "binary-no"])
+                    like_button = gr.Button("✓", elem_classes=["binary-btn", "binary-like"])
+                with gr.Column(elem_id="binary-hidden"):
+                    filename_output = gr.Markdown()
+                    progress_output = gr.Markdown()
 
-    with gr.Column(elem_id="rating-controls"):
-        with gr.Row(elem_id="rating-grid"):
-            btn_1 = gr.Button("1\nNo", elem_classes=["rate-btn", "rate-1"])
-            btn_2 = gr.Button("2\nDislike", elem_classes=["rate-btn", "rate-2"])
-            btn_3 = gr.Button("3\nNeutral", elem_classes=["rate-btn", "rate-3"])
-            btn_4 = gr.Button("4\nLike", elem_classes=["rate-btn", "rate-4"])
-            btn_5 = gr.Button("5\nLove", elem_classes=["rate-btn", "rate-5"])
+            outputs = [app_state, image_output, count_output]
+            demo.load(initialize_binary, outputs=outputs, js=BINARY_KEYBOARD_JS)
+            no_button.click(lambda state: rate_current_binary(state, 1), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+            like_button.click(lambda state: rate_current_binary(state, 5), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+            return demo
 
-        skip_button = gr.Button("Skip", elem_id="skip-button", elem_classes=["skip-btn"])
+        image_output = gr.Image(label=None, interactive=False, elem_id="image-output")
 
-        filename_output = gr.Markdown(elem_id="filename-output")
-        progress_output = gr.Markdown(elem_id="progress-output")
-        gr.Markdown("# Dataset Labeler", elem_id="label-title")
+        with gr.Column(elem_id="rating-controls"):
+            with gr.Row(elem_id="rating-grid"):
+                btn_1 = gr.Button("1\nNo", elem_classes=["rate-btn", "rate-1"])
+                btn_2 = gr.Button("2\nDislike", elem_classes=["rate-btn", "rate-2"])
+                btn_3 = gr.Button("3\nNeutral", elem_classes=["rate-btn", "rate-3"])
+                btn_4 = gr.Button("4\nLike", elem_classes=["rate-btn", "rate-4"])
+                btn_5 = gr.Button("5\nLove", elem_classes=["rate-btn", "rate-5"])
 
-    outputs = [app_state, image_output, filename_output, progress_output]
-    demo.load(initialize, outputs=outputs)
-    btn_1.click(lambda state: rate_current(state, 1), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
-    btn_2.click(lambda state: rate_current(state, 2), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
-    btn_3.click(lambda state: rate_current(state, 3), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
-    btn_4.click(lambda state: rate_current(state, 4), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
-    btn_5.click(lambda state: rate_current(state, 5), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
-    skip_button.click(skip_current, inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+            skip_button = gr.Button("Skip", elem_id="skip-button", elem_classes=["skip-btn"])
+
+            filename_output = gr.Markdown(elem_id="filename-output")
+            progress_output = gr.Markdown(elem_id="progress-output")
+            gr.Markdown("# Dataset Labeler", elem_id="label-title")
+
+        outputs = [app_state, image_output, filename_output, progress_output]
+        demo.load(initialize, outputs=outputs)
+        btn_1.click(lambda state: rate_current(state, 1), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+        btn_2.click(lambda state: rate_current(state, 2), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+        btn_3.click(lambda state: rate_current(state, 3), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+        btn_4.click(lambda state: rate_current(state, 4), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+        btn_5.click(lambda state: rate_current(state, 5), inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+        skip_button.click(skip_current, inputs=app_state, outputs=outputs, scroll_to_output=False, show_progress="hidden")
+        return demo
 
 
 if __name__ == "__main__":
     cli_args = parse_args()
-    configure(source_dirs=cli_args.source_dirs, output_csv=cli_args.output_csv, port=cli_args.port)
+    configure(source_dirs=cli_args.source_dirs, output_csv=cli_args.output_csv, port=cli_args.port, binary=cli_args.binary)
     print_lan_urls(SERVER_PORT)
-    demo.launch(server_name="0.0.0.0", server_port=SERVER_PORT, share=False, css=MOBILE_CSS, allowed_paths=allowed_paths())
+    demo = create_demo()
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=SERVER_PORT,
+        share=False,
+        allowed_paths=allowed_paths(),
+        css=BINARY_CSS if BINARY_MODE else MOBILE_CSS,
+    )

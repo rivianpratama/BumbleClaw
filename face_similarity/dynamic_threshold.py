@@ -8,6 +8,9 @@ from typing import Iterable, Mapping, Sequence
 
 LOG_MODE = "from_logs"
 ROLLING_MODE = "rolling"
+ADAPTIVE_ROLLING_MODE = "adaptive_rolling"
+ADAPTIVE_SCORE_ROLLING_MIN_HISTORY = 20
+ADAPTIVE_VALUE_ROLLING_MIN_HISTORY = 10
 
 
 @dataclass(frozen=True)
@@ -31,20 +34,57 @@ def effective_threshold(
 ) -> float:
     if not dynamic.enabled:
         return fixed_threshold
-    if dynamic.mode not in {LOG_MODE, ROLLING_MODE}:
+    if dynamic.mode not in {LOG_MODE, ROLLING_MODE, ADAPTIVE_ROLLING_MODE}:
         raise ValueError(f"unknown dynamic threshold mode: {dynamic.mode}")
     if dynamic.mode == ROLLING_MODE:
         scores = list(session_scores or [])[-dynamic.window:]
         min_history = dynamic.window
     else:
-        scores = recent_scores(
+        scores = recent_values(
             log_dir / "scores.csv",
+            value_field="score",
             limit=dynamic.window,
             current_config=current_config,
         )
-        min_history = min(dynamic.min_history, dynamic.window)
+        minimum = ADAPTIVE_SCORE_ROLLING_MIN_HISTORY if dynamic.mode == ADAPTIVE_ROLLING_MODE else dynamic.min_history
+        min_history = min(minimum, dynamic.window)
     return threshold_from_scores(
         scores,
+        fixed_threshold=fixed_threshold,
+        target_right_rate=dynamic.target_right_rate,
+        min_history=min_history,
+        min_threshold=dynamic.min_threshold,
+        max_threshold=dynamic.max_threshold,
+    )
+
+
+def effective_value_threshold(
+    *,
+    fixed_threshold: float,
+    dynamic: DynamicThresholdConfig,
+    log_dir: Path,
+    current_config: Mapping[str, object],
+    value_field: str,
+    session_values: Sequence[float] | None = None,
+) -> float:
+    if not dynamic.enabled:
+        return fixed_threshold
+    if dynamic.mode not in {LOG_MODE, ROLLING_MODE, ADAPTIVE_ROLLING_MODE}:
+        raise ValueError(f"unknown dynamic threshold mode: {dynamic.mode}")
+    if dynamic.mode == ROLLING_MODE:
+        values = list(session_values or [])[-dynamic.window:]
+        min_history = dynamic.window
+    else:
+        values = recent_values(
+            log_dir / "scores.csv",
+            value_field=value_field,
+            limit=dynamic.window,
+            current_config=current_config,
+        )
+        minimum = ADAPTIVE_VALUE_ROLLING_MIN_HISTORY if dynamic.mode == ADAPTIVE_ROLLING_MODE else dynamic.min_history
+        min_history = min(minimum, dynamic.window)
+    return threshold_from_scores(
+        values,
         fixed_threshold=fixed_threshold,
         target_right_rate=dynamic.target_right_rate,
         min_history=min_history,
@@ -81,24 +121,37 @@ def recent_scores(
     limit: int,
     current_config: Mapping[str, object],
 ) -> list[float]:
+    return recent_values(csv_path, value_field="score", limit=limit, current_config=current_config)
+
+
+def recent_values(
+    csv_path: Path,
+    *,
+    value_field: str,
+    limit: int,
+    current_config: Mapping[str, object],
+) -> list[float]:
     if limit < 1 or not csv_path.exists():
         return []
     rows = []
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             if row_matches_config(row, current_config):
-                score = parse_float(row.get("score"))
-                if score is not None:
-                    rows.append(score)
+                value = parse_float(row.get(value_field))
+                if value is not None:
+                    rows.append(value)
     return rows[-limit:]
 
 
 def row_matches_config(row: Mapping[str, str], current_config: Mapping[str, object]) -> bool:
     expected = {
+        "setup_name": current_config.get("setup_name"),
         "method": current_config.get("method"),
         "face_weight": current_config.get("face_weight"),
         "regressor_path": current_config.get("regressor_path"),
         "multimodal_regressor_path": current_config.get("multimodal_regressor_path"),
+        "decision_mode": current_config.get("decision_mode"),
+        "preference_model_path": current_config.get("preference_model_path"),
     }
     for field, expected_value in expected.items():
         actual = row.get(field, "")

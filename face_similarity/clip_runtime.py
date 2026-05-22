@@ -6,7 +6,7 @@ import sys
 
 CLIP_VENV_PYTHON = Path(r"D:\BumbleClawClipVenv\Scripts\python.exe")
 HF_CACHE_DIR = Path(r"D:\BumbleClawHFCache")
-CLIP_METHODS = {"face_biased", "multimodal"}
+CLIP_METHODS = {"face_biased", "multimodal", "multimodalx", "multimodalx2"}
 
 
 def configure_clip_cache() -> None:

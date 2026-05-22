@@ -10,7 +10,7 @@ import label_app
 
 class LabelAppTests(unittest.TestCase):
     def tearDown(self) -> None:
-        label_app.configure(source_dirs=None, output_csv="dataset_labels.csv", port=7861)
+        label_app.configure(source_dirs=None, output_csv="dataset_labels.csv", port=7861, binary=False)
 
     def test_initialize_randomizes_only_unlabeled_queue(self) -> None:
         paths = ["a.jpg", "b.jpg", "c.jpg"]
@@ -25,11 +25,29 @@ class LabelAppTests(unittest.TestCase):
         self.assertEqual(image, "c.jpg")
 
     def test_configure_overrides_source_output_and_port(self) -> None:
-        label_app.configure(source_dirs=["D:/BumbleTrain/selected"], output_csv="D:/BumbleTrain/labels/bumble_labels.csv", port=7863)
+        label_app.configure(
+            source_dirs=["D:/BumbleTrain/selected"],
+            output_csv="D:/BumbleTrain/labels/bumble_labels.csv",
+            port=7863,
+            binary=True,
+        )
 
         self.assertEqual(label_app.SOURCE_DIRS[0].as_posix(), "D:/BumbleTrain/selected")
         self.assertEqual(label_app.OUTPUT_CSV.as_posix(), "D:/BumbleTrain/labels/bumble_labels.csv")
         self.assertEqual(label_app.SERVER_PORT, 7863)
+        self.assertTrue(label_app.BINARY_MODE)
+
+    def test_parse_args_supports_binary_mode(self) -> None:
+        with patch("sys.argv", ["label_app.py", "--binary"]):
+            args = label_app.parse_args()
+
+        self.assertTrue(args.binary)
+
+    def test_binary_keyboard_shortcuts_use_arrow_keys(self) -> None:
+        self.assertIn('event.key === "ArrowLeft"', label_app.BINARY_KEYBOARD_JS)
+        self.assertIn(".binary-no button", label_app.BINARY_KEYBOARD_JS)
+        self.assertIn('event.key === "ArrowRight"', label_app.BINARY_KEYBOARD_JS)
+        self.assertIn(".binary-like button", label_app.BINARY_KEYBOARD_JS)
 
     def test_allowed_paths_includes_existing_source_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -13,14 +13,29 @@ const DYNAMIC_THRESHOLD = {
   maxThreshold: 62,
 };
 
+const DYNAMIC_PREFERENCE_THRESHOLD = {
+  fallbackThreshold: 0.556059,
+  targetRightRate: 0.20,
+  window: 200,
+  minHistory: 50,
+  minThreshold: 0.45,
+  maxThreshold: 0.75,
+};
+
 type ParsedScoreRow = {
   score: number | null;
+  finalScore: number | null;
   action: string;
+  setupName: string;
   method: string;
   faceWeight: string;
   regressorPath: string;
   multimodalRegressorPath: string;
   threshold: number | null;
+  decisionMode: string;
+  preferenceModelPath: string;
+  preferenceThreshold: number | null;
+  preferenceProbability: number | null;
   dynamicEnabled: boolean | null;
   dynamicMode: string;
   dynamicWindow: number | null;
@@ -29,6 +44,14 @@ type ParsedScoreRow = {
   dynamicMinHistory: number | null;
   dynamicMinThreshold: number | null;
   dynamicMaxThreshold: number | null;
+  dynamicPreferenceEnabled: boolean | null;
+  dynamicPreferenceMode: string;
+  dynamicPreferenceWindow: number | null;
+  dynamicPreferenceTargetRightRate: number | null;
+  dynamicPreferencePercentile: number | null;
+  dynamicPreferenceMinHistory: number | null;
+  dynamicPreferenceMinThreshold: number | null;
+  dynamicPreferenceMaxThreshold: number | null;
   ts: number;
 };
 
@@ -39,7 +62,11 @@ type LatestScore = {
   ridge: number | null;
   knn: number | null;
   action: string;
+  setup_name: string | null;
   method: string;
+  decision_mode: string | null;
+  preference_probability: number | null;
+  preference_threshold: number | null;
   screenshot: string | null;
   divergence: number | null;
 };
@@ -61,16 +88,20 @@ function normalizeConfigValue(value: string) {
 
 function rowMatchesConfig(row: ParsedScoreRow, currentConfig: ParsedScoreRow | null) {
   if (!currentConfig) return false;
-  const fields: Array<keyof Pick<ParsedScoreRow, 'method' | 'faceWeight' | 'regressorPath' | 'multimodalRegressorPath'>> = [
+  const fields: Array<keyof Pick<ParsedScoreRow, 'setupName' | 'method' | 'faceWeight' | 'regressorPath' | 'multimodalRegressorPath' | 'decisionMode' | 'preferenceModelPath'>> = [
+    'setupName',
     'method',
     'faceWeight',
     'regressorPath',
     'multimodalRegressorPath',
+    'decisionMode',
+    'preferenceModelPath',
   ];
 
   return fields.every((field) => {
     const actual = row[field];
     const expected = currentConfig[field];
+    if (!expected) return true;
     if (!actual) return true;
     return normalizeConfigValue(actual) === normalizeConfigValue(expected);
   });
@@ -106,6 +137,14 @@ function parseOptionalBoolean(value: string | undefined) {
   return null;
 }
 
+function displayFinalScore(row: Pick<ParsedScoreRow, 'score' | 'finalScore' | 'decisionMode' | 'preferenceProbability'>) {
+  if (row.finalScore !== null) return row.finalScore;
+  if (row.decisionMode === 'preference' && row.preferenceProbability !== null) {
+    return row.preferenceProbability * 100;
+  }
+  return row.score;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const offsetStr = searchParams.get('offset');
@@ -123,8 +162,10 @@ export async function GET(request: Request) {
     const headers = lines[0].trim().split(',');
     const tsIdx = headers.indexOf('timestamp');
     const methodIdx = headers.indexOf('method');
+    const setupNameIdx = headers.indexOf('setup_name');
     const actionIdx = headers.indexOf('action');
     const scoreIdx = headers.indexOf('score');
+    const finalScoreIdx = headers.indexOf('final_score');
     const screenshotIdx = headers.indexOf('screenshot');
     const fbIdx = headers.indexOf('face_biased');
     const mmIdx = headers.indexOf('multimodal');
@@ -133,6 +174,10 @@ export async function GET(request: Request) {
     const regressorPathIdx = headers.indexOf('regressor_path');
     const multimodalRegressorPathIdx = headers.indexOf('multimodal_regressor_path');
     const thresholdIdx = headers.indexOf('threshold');
+    const decisionModeIdx = headers.indexOf('decision_mode');
+    const preferenceModelPathIdx = headers.indexOf('preference_model_path');
+    const preferenceThresholdIdx = headers.indexOf('preference_threshold');
+    const preferenceProbabilityIdx = headers.indexOf('preference_probability');
     const dynamicEnabledIdx = headers.indexOf('dynamic_enabled');
     const dynamicModeIdx = headers.indexOf('dynamic_mode');
     const dynamicWindowIdx = headers.indexOf('dynamic_window');
@@ -141,6 +186,14 @@ export async function GET(request: Request) {
     const dynamicMinHistoryIdx = headers.indexOf('dynamic_min_history');
     const dynamicMinThresholdIdx = headers.indexOf('dynamic_min_threshold');
     const dynamicMaxThresholdIdx = headers.indexOf('dynamic_max_threshold');
+    const dynamicPreferenceEnabledIdx = headers.indexOf('dynamic_preference_enabled');
+    const dynamicPreferenceModeIdx = headers.indexOf('dynamic_preference_mode');
+    const dynamicPreferenceWindowIdx = headers.indexOf('dynamic_preference_window');
+    const dynamicPreferenceTargetRightRateIdx = headers.indexOf('dynamic_preference_target_right_rate');
+    const dynamicPreferencePercentileIdx = headers.indexOf('dynamic_preference_percentile');
+    const dynamicPreferenceMinHistoryIdx = headers.indexOf('dynamic_preference_min_history');
+    const dynamicPreferenceMinThresholdIdx = headers.indexOf('dynamic_preference_min_threshold');
+    const dynamicPreferenceMaxThresholdIdx = headers.indexOf('dynamic_preference_max_threshold');
     const faceWeightIdx = headers.indexOf('face_weight');
 
     if ([fbIdx, mmIdx, rgIdx, knIdx, actionIdx, scoreIdx, methodIdx, tsIdx].includes(-1)) {
@@ -180,20 +233,28 @@ export async function GET(request: Request) {
 
       const tsVal = parseTimestamp(row[tsIdx]);
       const method = row[methodIdx];
+      const setupName = setupNameIdx !== -1 ? row[setupNameIdx] || '' : '';
       const overallScore = parseFloat(row[scoreIdx]);
       const action = row[actionIdx]?.toLowerCase();
+      const decisionMode = decisionModeIdx !== -1 ? row[decisionModeIdx] || '' : '';
       const fb = parseFloat(row[fbIdx]);
       const mm = parseFloat(row[mmIdx]);
       const rg = parseFloat(row[rgIdx]);
       const kn = parseFloat(row[knIdx]);
       const parsedRow = {
         score: isNaN(overallScore) ? null : overallScore,
+        finalScore: finalScoreIdx !== -1 ? parseOptionalNumber(row[finalScoreIdx]) : null,
         action,
+        setupName,
         method,
         faceWeight: faceWeightIdx !== -1 ? row[faceWeightIdx] || '' : '',
         regressorPath: regressorPathIdx !== -1 ? row[regressorPathIdx] || '' : '',
         multimodalRegressorPath: multimodalRegressorPathIdx !== -1 ? row[multimodalRegressorPathIdx] || '' : '',
         threshold: thresholdIdx !== -1 ? parseOptionalNumber(row[thresholdIdx]) : null,
+        decisionMode,
+        preferenceModelPath: preferenceModelPathIdx !== -1 ? row[preferenceModelPathIdx] || '' : '',
+        preferenceThreshold: preferenceThresholdIdx !== -1 ? parseOptionalNumber(row[preferenceThresholdIdx]) : null,
+        preferenceProbability: preferenceProbabilityIdx !== -1 ? parseOptionalNumber(row[preferenceProbabilityIdx]) : null,
         dynamicEnabled: dynamicEnabledIdx !== -1 ? parseOptionalBoolean(row[dynamicEnabledIdx]) : null,
         dynamicMode: dynamicModeIdx !== -1 ? row[dynamicModeIdx] || '' : '',
         dynamicWindow: dynamicWindowIdx !== -1 ? parseOptionalNumber(row[dynamicWindowIdx]) : null,
@@ -202,9 +263,18 @@ export async function GET(request: Request) {
         dynamicMinHistory: dynamicMinHistoryIdx !== -1 ? parseOptionalNumber(row[dynamicMinHistoryIdx]) : null,
         dynamicMinThreshold: dynamicMinThresholdIdx !== -1 ? parseOptionalNumber(row[dynamicMinThresholdIdx]) : null,
         dynamicMaxThreshold: dynamicMaxThresholdIdx !== -1 ? parseOptionalNumber(row[dynamicMaxThresholdIdx]) : null,
+        dynamicPreferenceEnabled: dynamicPreferenceEnabledIdx !== -1 ? parseOptionalBoolean(row[dynamicPreferenceEnabledIdx]) : null,
+        dynamicPreferenceMode: dynamicPreferenceModeIdx !== -1 ? row[dynamicPreferenceModeIdx] || '' : '',
+        dynamicPreferenceWindow: dynamicPreferenceWindowIdx !== -1 ? parseOptionalNumber(row[dynamicPreferenceWindowIdx]) : null,
+        dynamicPreferenceTargetRightRate: dynamicPreferenceTargetRightRateIdx !== -1 ? parseOptionalNumber(row[dynamicPreferenceTargetRightRateIdx]) : null,
+        dynamicPreferencePercentile: dynamicPreferencePercentileIdx !== -1 ? parseOptionalNumber(row[dynamicPreferencePercentileIdx]) : null,
+        dynamicPreferenceMinHistory: dynamicPreferenceMinHistoryIdx !== -1 ? parseOptionalNumber(row[dynamicPreferenceMinHistoryIdx]) : null,
+        dynamicPreferenceMinThreshold: dynamicPreferenceMinThresholdIdx !== -1 ? parseOptionalNumber(row[dynamicPreferenceMinThresholdIdx]) : null,
+        dynamicPreferenceMaxThreshold: dynamicPreferenceMaxThresholdIdx !== -1 ? parseOptionalNumber(row[dynamicPreferenceMaxThresholdIdx]) : null,
         ts: tsVal,
       };
       parsedRows.push(parsedRow);
+      const finalScore = displayFinalScore(parsedRow);
       
       const validScores = [fb, mm, rg, kn].filter(v => !isNaN(v));
       let divergence = null;
@@ -215,13 +285,17 @@ export async function GET(request: Request) {
       }
       
       latestScore = {
-        score: isNaN(overallScore) ? null : overallScore,
+        score: finalScore,
         face_biased: isNaN(fb) ? null : fb,
         multimodal: isNaN(mm) ? null : mm,
         ridge: isNaN(rg) ? null : rg,
         knn: isNaN(kn) ? null : kn,
         action: action,
+        setup_name: setupName || null,
         method: method,
+        decision_mode: decisionMode || null,
+        preference_probability: parsedRow.preferenceProbability,
+        preference_threshold: parsedRow.preferenceThreshold,
         screenshot: screenshotIdx !== -1 ? row[screenshotIdx] : null,
         divergence
       };
@@ -237,23 +311,23 @@ export async function GET(request: Request) {
         methodDistribution[method] = (methodDistribution[method] || 0) + 1;
       }
 
-      if (!isNaN(overallScore)) {
-        scoreTotal += overallScore;
+      if (finalScore !== null) {
+        scoreTotal += finalScore;
         scoreCount++;
         
-        if (overallScore <= 20) scoreDistribution['1-20']++;
-        else if (overallScore <= 40) scoreDistribution['20-40']++;
-        else if (overallScore <= 60) scoreDistribution['40-60']++;
-        else if (overallScore <= 80) scoreDistribution['60-80']++;
+        if (finalScore <= 20) scoreDistribution['1-20']++;
+        else if (finalScore <= 40) scoreDistribution['20-40']++;
+        else if (finalScore <= 60) scoreDistribution['40-60']++;
+        else if (finalScore <= 80) scoreDistribution['60-80']++;
         else scoreDistribution['80-100']++;
       }
 
       if (action === 'left') {
         leftCount++;
-        if (!isNaN(overallScore)) leftScoreTotal += overallScore;
+        if (finalScore !== null) leftScoreTotal += finalScore;
       } else if (action === 'right') {
         rightCount++;
-        if (!isNaN(overallScore)) rightScoreTotal += overallScore;
+        if (finalScore !== null) rightScoreTotal += finalScore;
       }
 
       if (!isNaN(fb)) { fbTotal += fb; fbCount++; }
@@ -263,6 +337,7 @@ export async function GET(request: Request) {
     }
 
     const activeConfig: ParsedScoreRow | null = parsedRows.length > 0 ? parsedRows[parsedRows.length - 1] : null;
+    const activeDecisionMode = activeConfig?.decisionMode || 'threshold';
     const cliWindow = activeConfig?.dynamicWindow ?? DYNAMIC_THRESHOLD.window;
     const cliPercentile = activeConfig?.dynamicPercentile;
     const cliTargetRightRate = activeConfig?.dynamicTargetRightRate
@@ -290,6 +365,34 @@ export async function GET(request: Request) {
     const actualLeftCount = recentScores.filter((row) => row.action === 'left').length;
     const actualSwipeCount = actualLeftCount + actualRightCount;
 
+    const preferenceWindow = activeConfig?.dynamicPreferenceWindow ?? DYNAMIC_PREFERENCE_THRESHOLD.window;
+    const preferencePercentile = activeConfig?.dynamicPreferencePercentile;
+    const preferenceTargetRightRate = activeConfig?.dynamicPreferenceTargetRightRate
+      ?? (preferencePercentile === null || preferencePercentile === undefined
+        ? DYNAMIC_PREFERENCE_THRESHOLD.targetRightRate
+        : 1 - ((preferencePercentile > 1 ? preferencePercentile / 100 : preferencePercentile)));
+    const preferenceMinHistory = Math.min(
+      activeConfig?.dynamicPreferenceMinHistory ?? DYNAMIC_PREFERENCE_THRESHOLD.minHistory,
+      preferenceWindow,
+    );
+    const preferenceMinThreshold = activeConfig?.dynamicPreferenceMinThreshold ?? DYNAMIC_PREFERENCE_THRESHOLD.minThreshold;
+    const preferenceMaxThreshold = activeConfig?.dynamicPreferenceMaxThreshold ?? DYNAMIC_PREFERENCE_THRESHOLD.maxThreshold;
+    const recentPreferenceRows = parsedRows
+      .filter((row) => row.preferenceProbability !== null && rowMatchesConfig(row, activeConfig))
+      .slice(-preferenceWindow);
+    const recentPreferenceValues = recentPreferenceRows.map((row) => row.preferenceProbability as number);
+    const rawPreferenceThreshold = recentPreferenceRows.length >= preferenceMinHistory
+      ? quantile(recentPreferenceValues, 1 - preferenceTargetRightRate)
+      : null;
+    const computedPreferenceThreshold = rawPreferenceThreshold === null
+      ? DYNAMIC_PREFERENCE_THRESHOLD.fallbackThreshold
+      : clamp(rawPreferenceThreshold, preferenceMinThreshold, preferenceMaxThreshold);
+    const effectivePreferenceThreshold = activeConfig?.preferenceThreshold ?? computedPreferenceThreshold;
+    const projectedPreferenceRightCount = recentPreferenceValues.filter((probability) => probability >= effectivePreferenceThreshold).length;
+    const actualPreferenceRightCount = recentPreferenceRows.filter((row) => row.action === 'right').length;
+    const actualPreferenceLeftCount = recentPreferenceRows.filter((row) => row.action === 'left').length;
+    const actualPreferenceSwipeCount = actualPreferenceLeftCount + actualPreferenceRightCount;
+
     const totalSwipes = leftCount + rightCount;
     const leftPercent = totalSwipes > 0 ? (leftCount / totalSwipes) * 100 : 0;
     const rightPercent = totalSwipes > 0 ? (rightCount / totalSwipes) * 100 : 0;
@@ -304,6 +407,7 @@ export async function GET(request: Request) {
 
     const trend: { time: number; threshold: number; score: number | null; action: string | null }[] = [];
     const matchingScores: number[] = [];
+    const matchingPreferenceProbabilities: number[] = [];
     
     // We only need the past 24 hours of data max for the UI (1 day).
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -314,34 +418,40 @@ export async function GET(request: Request) {
       if (row.score !== null) {
         matchingScores.push(row.score);
       }
+      if (row.preferenceProbability !== null) {
+        matchingPreferenceProbabilities.push(row.preferenceProbability);
+      }
       
       // Only keep points within the 1-day UI window
       if (row.ts < oneDayAgo) continue;
 
-      let currentThreshold = row.threshold;
+      let currentThreshold = activeDecisionMode === 'preference' ? row.preferenceThreshold : row.threshold;
       
-      const w = row.dynamicWindow ?? cliWindow;
-      const minHist = row.dynamicMinHistory ?? cliMinHistory;
-      const tgtRate = row.dynamicTargetRightRate ?? cliTargetRightRate;
+      const w = activeDecisionMode === 'preference' ? (row.dynamicPreferenceWindow ?? preferenceWindow) : (row.dynamicWindow ?? cliWindow);
+      const minHist = activeDecisionMode === 'preference' ? (row.dynamicPreferenceMinHistory ?? preferenceMinHistory) : (row.dynamicMinHistory ?? cliMinHistory);
+      const tgtRate = activeDecisionMode === 'preference' ? (row.dynamicPreferenceTargetRightRate ?? preferenceTargetRightRate) : (row.dynamicTargetRightRate ?? cliTargetRightRate);
+      const matchingValues = activeDecisionMode === 'preference' ? matchingPreferenceProbabilities : matchingScores;
       
       if (currentThreshold === null) {
-         if (matchingScores.length >= minHist) {
-            const recent = matchingScores.slice(-w);
+         if (matchingValues.length >= minHist) {
+            const recent = matchingValues.slice(-w);
             const raw = quantile(recent, 1 - tgtRate);
             if (raw !== null) {
-               currentThreshold = clamp(raw, row.dynamicMinThreshold ?? cliMinThreshold, row.dynamicMaxThreshold ?? cliMaxThreshold);
+               currentThreshold = activeDecisionMode === 'preference'
+                 ? clamp(raw, row.dynamicPreferenceMinThreshold ?? preferenceMinThreshold, row.dynamicPreferenceMaxThreshold ?? preferenceMaxThreshold)
+                 : clamp(raw, row.dynamicMinThreshold ?? cliMinThreshold, row.dynamicMaxThreshold ?? cliMaxThreshold);
             } else {
-               currentThreshold = DYNAMIC_THRESHOLD.fallbackThreshold;
+               currentThreshold = activeDecisionMode === 'preference' ? DYNAMIC_PREFERENCE_THRESHOLD.fallbackThreshold : DYNAMIC_THRESHOLD.fallbackThreshold;
             }
          } else {
-            currentThreshold = DYNAMIC_THRESHOLD.fallbackThreshold;
+            currentThreshold = activeDecisionMode === 'preference' ? DYNAMIC_PREFERENCE_THRESHOLD.fallbackThreshold : DYNAMIC_THRESHOLD.fallbackThreshold;
          }
       }
       
       trend.push({
          time: row.ts,
          threshold: currentThreshold,
-         score: row.score,
+         score: activeDecisionMode === 'preference' ? row.preferenceProbability : row.score,
          action: row.action
       });
     }
@@ -368,6 +478,12 @@ export async function GET(request: Request) {
       scoreDistribution,
       velocity: velocityPerMinute,
       latest: latestScore,
+      activeSetup: {
+        name: activeConfig?.setupName || null,
+        decisionMode: activeDecisionMode,
+        preferenceModelPath: activeConfig?.preferenceModelPath || null,
+        faceWeight: activeConfig?.faceWeight || null,
+      },
       dynamicThreshold: {
         enabled: true,
         active: rawThreshold !== null,
@@ -388,6 +504,27 @@ export async function GET(request: Request) {
         actualLeftCount,
         actualRightCount,
         actualRightPercent: actualSwipeCount > 0 ? (actualRightCount / actualSwipeCount) * 100 : 0,
+      },
+      dynamicPreferenceThreshold: {
+        enabled: activeDecisionMode === 'preference',
+        active: rawPreferenceThreshold !== null,
+        threshold: effectivePreferenceThreshold,
+        rawThreshold: rawPreferenceThreshold,
+        fallbackThreshold: DYNAMIC_PREFERENCE_THRESHOLD.fallbackThreshold,
+        source: activeConfig?.preferenceThreshold == null ? 'computed' : 'cli_log',
+        mode: activeConfig?.dynamicPreferenceMode || null,
+        targetRightRate: preferenceTargetRightRate,
+        percentile: (1 - preferenceTargetRightRate) * 100,
+        window: preferenceWindow,
+        minHistory: preferenceMinHistory,
+        minThreshold: preferenceMinThreshold,
+        maxThreshold: preferenceMaxThreshold,
+        historyCount: recentPreferenceRows.length,
+        projectedRightCount: projectedPreferenceRightCount,
+        projectedRightPercent: recentPreferenceRows.length > 0 ? (projectedPreferenceRightCount / recentPreferenceRows.length) * 100 : 0,
+        actualLeftCount: actualPreferenceLeftCount,
+        actualRightCount: actualPreferenceRightCount,
+        actualRightPercent: actualPreferenceSwipeCount > 0 ? (actualPreferenceRightCount / actualPreferenceSwipeCount) * 100 : 0,
       },
       trend,
       records: scoreCount,
