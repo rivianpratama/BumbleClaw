@@ -1,8 +1,8 @@
 <div align="center">
   <h1>BumbleClaw</h1>
-  <p><strong>A local visual-preference research loop for Bumble screenshots.</strong></p>
+  <p><strong>A Bumble Autoswipe tools trained around one person's visual preference.</strong></p>
   <p>
-    Capture -> label -> embed -> train -> benchmark -> relabel the hard cases -> calibrate live decisions.
+    Nearly 10,000 local preference examples later: capture -> label -> embed -> train -> benchmark -> relabel the hard cases -> calibrate live decisions.
   </p>
   <p>
     <img alt="Python" src="https://img.shields.io/badge/Python-ML%20pipeline-3776AB?style=for-the-badge&logo=python&logoColor=white">
@@ -15,7 +15,9 @@
 > [!IMPORTANT]
 > The public workflow should contain the process and tools, not private screenshots, labels, embeddings, fitted models, browser state, or swipe logs from one person's trained behavior. Review tracked artifacts before publishing a clone or release.
 
-BumbleClaw can capture the visible profile from Bumble Web or a connected Android phone, score the image with locally trained models, log the score components, and optionally turn that output into a left or right swipe. The repository keeps the experiment history visible because the failures changed the design.
+BumbleClaw is the autoswipe product I wanted for Bumble: it watches the visible profile from Bumble Web or a connected Android phone, scores the profile image with models trained on my visual preference, logs what each model component believed, and can turn that output into a left or right swipe.
+
+The local training journey grew from a small face-similarity experiment into almost 10,000 labeled preference examples, multiple Bumble-specific re-labeling rounds, binary swipe labels, held-out benchmarks, disagreement-only evaluations, and runtime threshold experiments. The repository keeps that history visible because the product only became useful by following the failures.
 
 It is not a public preference dataset and it is not a portable recommendation model. A model trained from one person's labels is not a general ranking of other people.
 
@@ -23,6 +25,7 @@ Users are responsible for the legality, platform rules, privacy handling, and ap
 
 <p align="center">
   <a href="#the-journey">Journey</a> |
+  <a href="#research-finding">Finding</a> |
   <a href="#pipeline-overview">Pipeline</a> |
   <a href="#replicate-the-process">Replication</a> |
   <a href="#runtime-options">Runtime</a> |
@@ -31,17 +34,17 @@ Users are responsible for the legality, platform rules, privacy handling, and ap
 
 ## At A Glance
 
-| Surface | What It Does |
+| Product Surface | What It Does |
 | --- | --- |
-| Capture | Reads Bumble Web screenshots or Android screen captures. |
-| Rating | Scores image evidence with KNN, face regressors, multimodal regressors, and blend formulas. |
-| Decision | Compares score thresholds or learned preference probabilities against static or dynamic boundaries. |
-| Feedback | Selects logged screenshots for fresh labels, screenshot rounds, preference labels, and disagreement checks. |
-| Inspection | Keeps score components, thresholds, screenshots, and setup metadata visible through local reports and a dashboard. |
+| Autoswipe runner | Reads Bumble Web screenshots or Android screen captures and executes swipe decisions. |
+| Preference scorer | Scores visual evidence with KNN, face regressors, multimodal regressors, and blend formulas. |
+| Decision engine | Chooses between score thresholds, learned preference probabilities, and dynamic runtime calibration. |
+| Training loop | Selects logged screenshots for new ratings, binary swipe labels, and disagreement checks. |
+| Inspection layer | Keeps score components, thresholds, screenshots, and setup metadata visible through local reports and a dashboard. |
 
 ## The Journey
 
-This repo did not begin as a grand autoswipe system. It started as a face-similarity rater and got more complicated only when the next benchmark or live log exposed a specific gap.
+This repo did not begin as a grand autoswipe system. It started as a face-similarity rater and got more complicated only when the next benchmark or live Bumble session exposed a specific gap.
 
 ```text
 face similarity
@@ -55,16 +58,18 @@ face similarity
 -> named experiment setups
 ```
 
-| Phase | What Changed | Why It Changed |
+| Method Step | What Changed | Decision And Reason |
 | --- | --- | --- |
-| Face reference baseline | KNN over labeled InsightFace embeddings | The first goal was to prove that labels could drive a repeatable score at all. |
-| Rating models | Ridge and other supervised regressors over face embeddings | Nearest examples were interpretable but too brittle to be the whole scorer. |
-| Multimodal rating | Face + CLIP image signals | Bumble screenshots are not clean portraits: crop, pose, lighting, app framing, and visible context matter. |
-| Bumble-specific rounds | Re-label logged screenshots and combine them with earlier labels | The screenshot domain did not behave like the original reference image pool. |
-| Dynamic thresholds | Use recent score percentiles instead of trusting one fixed cutoff forever | The shown profile stream drifts, and a threshold that felt right in one slice can become too strict or too loose later. |
-| Binary preference labels | Train a `P(like)` decision layer from actual left/right intent | A five-point attractiveness/rating label and a real swipe decision are related but not the same target. |
-| Veto / disagreement evaluation | Label profiles where model decisions disagree | Easy unanimous examples inflate confidence; hard boundary cases expose the decision layer. |
-| Named setups | Keep Round2, Round3, MultimodalX, and veto experiments explicit | Artifact bundles, formula weights, KNN `k`, and threshold policy can be valid alone but wrong together. |
+| 1. Face-similarity baseline | Start with KNN over labeled InsightFace embeddings. | First prove that my labels could produce a repeatable ranking signal before training heavier models. |
+| 2. Face rating model | Train supervised face regressors from the 1-5 visual ratings. | Nearest-neighbor similarity was interpretable but too brittle; a smoother learned score reduced dependence on single references. |
+| 3. Multimodal rating model | Add CLIP image signals beside face embeddings. | Bumble is not a clean portrait benchmark: crop, pose, lighting, app framing, and image context influence the screenshots the product actually sees. |
+| 4. Face-biased blend | Combine face and multimodal ratings instead of trusting one alone. | The product needed an explicit tradeoff between facial preference and broader screenshot semantics. |
+| 5. Bumble screenshot rounds | Curate logged Bumble screenshots, crop them, label them again, and merge them into training rounds. | Real Bumble images exposed distribution shift from the original reference pool, so the data loop moved closer to runtime inputs. |
+| 6. Threshold calibration | Replace one fixed right-swipe boundary with score percentiles over recent logs. | A score cutoff that behaved well in one pool could become too strict or too permissive as the shown profile stream changed. |
+| 7. Binary swipe preference layer | Train `P(like)` from score components and actual left/right intent. | A five-point attractiveness score and a real swipe decision are related but not the same target. |
+| 8. Formula branches | Test MultimodalX mixes of ridge, multimodal, KNN, and learned probability signals. | I wanted to know whether component blends could improve swipe decisions without hiding the score anatomy. |
+| 9. Veto spline layer | Label disagreement-heavy cases and train a decision layer on the hard boundary. | Easy all-left or all-right examples were not where the autoswipe product failed; contested profiles were. |
+| 10. Revisit earlier stacks | Re-run earlier scorers under the newer decision layer. | The best base scorer and the best decision layer are separate choices, so an older visual stack can become useful again after the decision method improves. |
 
 The experiment stayed honest about dead ends:
 
@@ -74,6 +79,27 @@ The experiment stayed honest about dead ends:
 - A multi-model vote sounded attractive, but repeated scoring and repeated history scans have real runtime cost. It should earn its complexity in a benchmark.
 
 The public README intentionally avoids publishing private labels and local validation rows. It keeps the process, the experiment lineage, and the concerns that made each next round necessary.
+
+## Research Finding
+
+### Benchmark accuracy is not the same as live satisfaction
+
+One of the most important findings from this project is that the mathematically strongest model on a held-out table is not automatically the model that feels best in a stochastic live product.
+
+A benchmark compresses behavior into metrics such as error rate, precision, recall, and calibration. Those numbers matter; they prevented me from trusting vibes alone. But the Bumble autoswipe loop is experienced as a stream of decisions. Two models can have similar aggregate quality while producing very different error shapes:
+
+- one model may make fewer total mistakes but disappoint more often on the profiles I care about;
+- another may be slightly weaker on a benchmark yet feel more aligned in live browsing because its misses are less costly to my satisfaction;
+- dynamic thresholds can preserve a target swipe rate without fixing a model whose ranked ordering feels wrong.
+
+That changed the methodology:
+
+1. Use held-out metrics to reject obviously weak or overfit models.
+2. Inspect false positives and false negatives separately, not only a single accuracy number.
+3. Validate on real screenshot-domain labels and disagreement cases.
+4. Treat live satisfaction as a product criterion after the math clears a minimum bar.
+
+In short: the model should be measurable, but the autoswipe product should still optimize for the user's experienced preference stream.
 
 ## Concerns That Shape The Design
 
