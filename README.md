@@ -1,155 +1,142 @@
-# BumbleClaw Visual Preference Autoswipe
+<div align="center">
+  <h1>BumbleClaw</h1>
+  <p><strong>A local visual-preference research loop for Bumble screenshots.</strong></p>
+  <p>
+    Capture -> label -> embed -> train -> benchmark -> relabel the hard cases -> calibrate live decisions.
+  </p>
+  <p>
+    <img alt="Python" src="https://img.shields.io/badge/Python-ML%20pipeline-3776AB?style=for-the-badge&logo=python&logoColor=white">
+    <img alt="Local first" src="https://img.shields.io/badge/Data-local%20first-1F6FEB?style=for-the-badge">
+    <img alt="InsightFace and CLIP" src="https://img.shields.io/badge/Vision-InsightFace%20%2B%20CLIP-0F766E?style=for-the-badge">
+    <img alt="Dashboard" src="https://img.shields.io/badge/Dashboard-Next.js-111111?style=for-the-badge&logo=nextdotjs&logoColor=white">
+  </p>
+</div>
 
-BumbleClaw is a local Bumble autoswipe system driven by your visual preferences. It reads the visible profile image from Bumble Web or a connected Android phone, scores it with models trained from your labels and historical swipe logs, then decides whether to swipe left or right.
+> [!IMPORTANT]
+> The public workflow should contain the process and tools, not private screenshots, labels, embeddings, fitted models, browser state, or swipe logs from one person's trained behavior. Review tracked artifacts before publishing a clone or release.
 
-This project started as a face-similarity rater. That baseline made the data loop concrete: label examples, embed them with InsightFace, compare against nearby references, and produce a score. The current system builds on that baseline:
+BumbleClaw can capture the visible profile from Bumble Web or a connected Android phone, score the image with locally trained models, log the score components, and optionally turn that output into a left or right swipe. The repository keeps the experiment history visible because the failures changed the design.
 
-1. InsightFace still provides face embeddings and a nearest-reference baseline.
-2. Supervised regressors learn your `0-100` visual ratings from face embeddings.
-3. CLIP image embeddings add profile-image context that face embeddings miss.
-4. A binary preference layer learns `P(like)` from the score components that actually drive swipe decisions.
-5. Live logs feed dynamic thresholds and new labeling rounds so each generation can be benchmarked against held-out Bumble screenshots.
+It is not a public preference dataset and it is not a portable recommendation model. A model trained from one person's labels is not a general ranking of other people.
 
-The output is personal preference automation.
+Users are responsible for the legality, platform rules, privacy handling, and appropriateness of any data they collect or automate.
 
-## Current Method
+<p align="center">
+  <a href="#the-journey">Journey</a> |
+  <a href="#pipeline-overview">Pipeline</a> |
+  <a href="#replicate-the-process">Replication</a> |
+  <a href="#runtime-options">Runtime</a> |
+  <a href="#dashboard-and-inspection">Dashboard</a>
+</p>
 
-For the current personal runtime, the preferred branch is the Round3 fine-tuned MultimodalX line:
+## At A Glance
 
-```text
-research lineage = Multimodal X3 P85 and Multimodal X4 P80
-repo presets     = multimodalx4 and multimodalx5
-base stack       = bumble_combined_round3 rating system
-decision layer   = Round3 score components + learned preference veto layer
-runtime target   = dynamic P(like) threshold calibrated to recent logs
-```
+| Surface | What It Does |
+| --- | --- |
+| Capture | Reads Bumble Web screenshots or Android screen captures. |
+| Rating | Scores image evidence with KNN, face regressors, multimodal regressors, and blend formulas. |
+| Decision | Compares score thresholds or learned preference probabilities against static or dynamic boundaries. |
+| Feedback | Selects logged screenshots for fresh labels, screenshot rounds, preference labels, and disagreement checks. |
+| Inspection | Keeps score components, thresholds, screenshots, and setup metadata visible through local reports and a dashboard. |
 
-After recreating the matching private artifacts, run the P85 path with:
+## The Journey
 
-```powershell
-python bumble_auto.py --setup multimodalx4 --log-dir <path-to-private-log-dir>
-```
-
-Run the P80 path with:
-
-```powershell
-python bumble_auto.py --setup multimodalx5 --log-dir <path-to-private-log-dir>
-```
-
-or on Android:
-
-```powershell
-python bumble_phone_auto.py --setup multimodalx4 --log-dir <path-to-private-log-dir>
-python bumble_phone_auto.py --setup multimodalx5 --log-dir <path-to-private-log-dir>
-```
-
-These presets fine-tune the Round3 visual stack around actual swipe behavior:
-
-- The base rating components come from the Round3 store, face regressor, multimodal regressor, and KNN reference score.
-- A blend preference model estimates the older `P(like)` signal from the original score-component feature space.
-- A second spline-logistic preference or veto layer is trained on disagreement-heavy Bumble decisions so it can correct profiles where the rating stack and the observed swipe preference diverge.
-- Dynamic preference percentiles convert that learned probability into a live right-swipe boundary: P85 is stricter and P80 is less strict.
-- The formula search keeps the score mathematically small: weighted ridge, multimodal, KNN, and learned probability components are tuned and then checked on held-out validation labels.
-
-The P85 runnable preset is `multimodalx4`:
+This repo did not begin as a grand autoswipe system. It started as a face-similarity rater and got more complicated only when the next benchmark or live log exposed a specific gap.
 
 ```text
-Round3 artifacts = reference_store_bumble_combined_round3
-formula          = MultimodalX2 score
-weights          = 0.12 ridge + 0.05 multimodal
-                   + 0.30 KNN + 0.53 old P(like)
-veto model       = bumble_preference_multimodalx4
-blend model      = bumble_preference_classifier
-runtime          = dynamic preference P85, k=9
+face similarity
+-> 1-5 rating labels
+-> supervised face score
+-> CLIP-aware screenshot score
+-> face-biased blends
+-> dynamic score thresholds
+-> binary P(like) layer
+-> disagreement-only veto labels
+-> named experiment setups
 ```
 
-The P80 runnable preset is `multimodalx5`:
-
-```text
-Round3 artifacts = reference_store_bumble_combined_round3
-formula          = tuned MultimodalX score
-weights          = 0.60 ridge + 0.05 multimodal
-                   + 0.20 KNN + 0.15 old P(like)
-veto model       = bumble_preference_multimodalx5
-blend model      = bumble_preference_classifier
-runtime          = dynamic preference P80, k=11
-```
-
-The P85 and P80 finalist reports produced during my local experiments are:
-
-- `results/multimodalx4_ratio_finalists_p85.csv`
-- `results/multimodalx5_ratio_finalists_p80.csv`
-
-The result rows use `x3__...` formula IDs because this branch was tuned from the MultimodalX3 Round3 veto/formula lane before the deployable presets were named `multimodalx4` and `multimodalx5`.
-
-For comparison, the strongest earlier top-model benchmark in this repo is the `experimental1` stack:
-
-```text
-store       = bumble_combined_round2
-score       = 0.30 * face_regressor + 0.70 * multimodal_regressor
-decision    = spline-logistic binary preference model over score components
-runtime     = dynamic P(like) threshold from recent logs
-```
-
-Run that earlier recommendation with:
-
-```powershell
-python bumble_auto.py --setup experimental1 --log-dir <path-to-private-log-dir>
-```
-
-or on Android:
-
-```powershell
-python bumble_phone_auto.py --setup experimental1 --log-dir <path-to-private-log-dir>
-```
-
-The preset is defined in `face_similarity/experimental_setup.py`. It selects:
-
-- `embeddings/reference_store_bumble_combined_round2.npz`
-- `models/rating_regressor_bumble_combined_round2.joblib`
-- `models/rating_regressor_multimodal_bumble_combined_round2.joblib`
-- `models/bumble_preference_experimental1.joblib`
-
-### Why This Method
-
-The model evolved by measuring each added layer.
-
-| Stage | Method | What It Tests |
+| Phase | What Changed | Why It Changed |
 | --- | --- | --- |
-| Face reference baseline | Weighted nearest labeled faces | Whether labels and embeddings contain a usable preference signal |
-| Face regressor | Ridge, Random Forest, HistGradientBoosting | Whether supervised face embeddings beat nearest-reference averaging |
-| Multimodal regressor | Face, CLIP, and face+CLIP Ridge/logistic-expected/MLP | Whether profile-image semantics improve rating prediction |
-| Score blend | Face-biased mix of face and multimodal regressors | Whether a simple blend is more stable on Bumble screenshots |
-| Preference layer | Thresholds, bucket rate, spline logistic, gradient boosting | Whether `P(like)` improves swipe decisions over raw score |
-| Dynamic runtime | Recent score or `P(like)` percentiles | Whether the right-swipe rate stays calibrated as the profile stream shifts |
+| Face reference baseline | KNN over labeled InsightFace embeddings | The first goal was to prove that labels could drive a repeatable score at all. |
+| Rating models | Ridge and other supervised regressors over face embeddings | Nearest examples were interpretable but too brittle to be the whole scorer. |
+| Multimodal rating | Face + CLIP image signals | Bumble screenshots are not clean portraits: crop, pose, lighting, app framing, and visible context matter. |
+| Bumble-specific rounds | Re-label logged screenshots and combine them with earlier labels | The screenshot domain did not behave like the original reference image pool. |
+| Dynamic thresholds | Use recent score percentiles instead of trusting one fixed cutoff forever | The shown profile stream drifts, and a threshold that felt right in one slice can become too strict or too loose later. |
+| Binary preference labels | Train a `P(like)` decision layer from actual left/right intent | A five-point attractiveness/rating label and a real swipe decision are related but not the same target. |
+| Veto / disagreement evaluation | Label profiles where model decisions disagree | Easy unanimous examples inflate confidence; hard boundary cases expose the decision layer. |
+| Named setups | Keep Round2, Round3, MultimodalX, and veto experiments explicit | Artifact bundles, formula weights, KNN `k`, and threshold policy can be valid alone but wrong together. |
 
-The benchmark workflow that led to these choices produces reports such as:
+The experiment stayed honest about dead ends:
 
-- `results/preference_top_model_best.csv` for the top scoring-generation recommendation.
-- `results/bumble_preference_benchmark.csv` for score-threshold and preference-layer comparisons.
-- `results/multimodal_regressor_eval*.csv` for rating MAE/RMSE across face, CLIP, and combined regressors.
-- `results/benchmark_round3_locked_validation.csv` for a locked Bumble validation comparison between score stacks.
+- Fixed thresholds were easier to explain, but runtime score distributions shifted.
+- More formula components did not automatically reduce swipe mistakes.
+- A learned preference layer could improve a score stack and still feel wrong live if its calibration or training labels were mismatched.
+- A multi-model vote sounded attractive, but repeated scoring and repeated history scans have real runtime cost. It should earn its complexity in a benchmark.
 
-These reports, fitted models, embedding stores, screenshots, and label CSVs belong to the private experiment workspace. The public repo carries the scripts needed to regenerate them from user-procured data.
+The public README intentionally avoids publishing private labels and local validation rows. It keeps the process, the experiment lineage, and the concerns that made each next round necessary.
 
-The earlier top-model benchmark decision path is:
+## Concerns That Shape The Design
 
-```text
-face_score       = face embedding regressor
-multimodal_score = CLIP + face regressor
-score            = 0.30 * face_score + 0.70 * multimodal_score
-features         = score, face_score, multimodal_score, KNN score,
-                   score spread, threshold distance, score bucket,
-                   round flags, and related score metadata
-p_like           = spline_logistic(features)
-decision         = right if p_like >= preference_threshold else left
+### Private data
+
+Profile screenshots, swipe logs, label CSVs, browser state, embedding stores, and fitted preference models can all expose personal information. Keep them outside a public repository. The `.gitignore` is intentionally aggressive around generated images, CSVs, embeddings, models, and logs.
+
+### Rating versus decision
+
+The rating pipeline answers a question like "what numeric visual score would this labeler give this image?" The preference pipeline answers a different question: "given the current score components and prior labels, would this labeler choose right?" The second layer exists because a single `0-100` threshold often misses non-monotonic or context-dependent decisions.
+
+### Screenshot-domain mismatch
+
+Clean reference photos and Bumble screenshots are not the same input distribution. Screenshot rounds exist to test crops, app chrome, visible text, framing, low-quality logs, and profiles near the decision boundary. Keep locked validation examples before training new screenshot rounds.
+
+### Calibration drift
+
+The shown pool can shift during a run. Runtime supports static thresholds and recent-history percentile thresholds over either score values or preference probabilities. Dynamic thresholds are calibration tools; they do not make a weak model accurate by themselves.
+
+### Sensitive attributes
+
+Filtering rules that the app exposes to the user belong in the app settings or explicit profile data path. The visual model should not infer sensitive attributes from appearance as a shortcut.
+
+### Artifact mismatch
+
+A reference store, face regressor, multimodal regressor, preference model, formula score, KNN `k`, crop preset, and threshold policy can be individually valid but wrong together. Named setups keep experimental bundles together after the matching local artifacts have been regenerated.
+
+## Pipeline Overview
+
+The main score components are:
+
+- **KNN**: weighted nearest labeled face embeddings.
+- **Face regressor**: a supervised rating model over face embeddings.
+- **Multimodal regressor**: a supervised rating model that can use face and CLIP image features.
+- **Face-biased score**: a weighted blend of face and multimodal ratings.
+- **Preference probability**: a classifier over score components and derived features such as component spread, score bucket, and distance from threshold.
+
+```mermaid
+flowchart LR
+    A[Visible profile screenshot] --> B[Face embedding]
+    A --> C[CLIP image embedding]
+    B --> D[KNN reference score]
+    B --> E[Face regressor]
+    B --> F[Multimodal regressor]
+    C --> F
+    D --> G[Score components]
+    E --> G
+    F --> G
+    G --> H[Raw score or formula blend]
+    G --> I[Preference features]
+    H --> J[Static or dynamic score threshold]
+    I --> K[P like or veto layer]
+    K --> L[Static or dynamic probability threshold]
+    J --> M[Left or right decision]
+    L --> M
+    M --> N[Logs, dashboard, relabel queue]
 ```
 
-With the preference presets, the threshold is seeded from the trained model and can be recalibrated from the latest matching log history.
+For later experiments the "final score" shown in logs may be a calibrated preference probability scaled to `0-100`, while component scores remain available for debugging and benchmarks.
 
 ## Install
 
-The code is Windows-oriented. Keep datasets, logs, model caches, and training workspaces outside the public repo when they contain personal images or swipe history.
+The project is Windows-oriented.
 
 Create the base Python environment:
 
@@ -160,9 +147,9 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-InsightFace downloads its model files on first use.
+InsightFace downloads its local model files on first use.
 
-CLIP requires PyTorch and Transformers. CLIP-dependent methods can use a separate environment when the PyTorch install and model cache should live outside the base environment. Configure `CLIP_VENV_PYTHON` and `HF_CACHE_DIR` in `face_similarity/clip_runtime.py` for your machine, then create that environment if you use `face_biased`, `multimodal`, or MultimodalX methods:
+CLIP-dependent methods require PyTorch and Transformers. The code supports a separate CLIP environment and cache so large model dependencies do not need to live in the public repo. Configure `CLIP_VENV_PYTHON` and `HF_CACHE_DIR` in `face_similarity/clip_runtime.py` for the machine that runs CLIP, then create that environment when needed:
 
 ```powershell
 $CLIP_VENV = "<path-to-clip-venv>"
@@ -174,126 +161,21 @@ pip install -r requirements-clip.txt
 python -m playwright install chromium
 ```
 
-Keep the Hugging Face and Torch caches outside the repo if they are large or shared across projects.
-
 Check ONNX Runtime GPU support:
 
 ```powershell
 python check_gpu.py
 ```
 
-`CUDAExecutionProvider` is preferred. CPU mode still works, but live CLIP-assisted automation will be slower.
+`CUDAExecutionProvider` is preferred for live CLIP-assisted runs. CPU mode is useful for simpler checks but will be slower.
 
-## Run Autoswipe
+## Replicate The Process
 
-### Bumble Web
+### 1. Build a base rating dataset
 
-Start with one visible profile before enabling a loop:
+Start with user-procured images that you are allowed to use. Keep low, neutral, and high examples so the score range is not trained only around one outcome.
 
-```powershell
-$LOG_DIR = "<path-to-private-log-dir>"
-python bumble_auto.py --setup multimodalx4 --log-dir $LOG_DIR
-```
-
-Use `--setup multimodalx5` for the P80 variant. The first run opens a persistent Playwright profile in `.bumble_browser`. Log in to Bumble in that browser session if needed, leave a profile visible, and run again.
-
-Run continuously with an explicit delay:
-
-```powershell
-python bumble_auto.py --setup multimodalx4 --log-dir $LOG_DIR --loop --delay 4
-```
-
-Run the long-loop mode with randomized delays and hourly pauses:
-
-```powershell
-python bumble_auto.py --setup multimodalx4 --log-dir $LOG_DIR --loop --247
-```
-
-Useful alternatives:
-
-```powershell
-# Current default Round3 score stack with a fixed score threshold
-python bumble_auto.py --log-dir $LOG_DIR
-
-# Preferred Round3 fine-tuned P85 and P80 paths
-python bumble_auto.py --setup multimodalx4 --log-dir $LOG_DIR
-python bumble_auto.py --setup multimodalx5 --log-dir $LOG_DIR
-
-# Explicit preference decision layer
-python bumble_auto.py --decision-mode preference --method face_biased --log-dir $LOG_DIR
-
-# Score-only dynamic threshold
-python bumble_auto.py --method face_biased --dynamic-from-logs --dynamic-percentile 80 --log-dir $LOG_DIR
-```
-
-The Web runner saves a current screenshot under `results/` and writes compressed profile logs to its configured log directory. Override that path with `--log-dir` when the logs should live outside the repo.
-
-### Android Phone
-
-Enable Android USB debugging, connect the phone, and make sure `adb devices` sees it.
-
-Score and swipe the current Bumble screen once:
-
-```powershell
-python bumble_phone_auto.py --setup multimodalx4 --log-dir $LOG_DIR
-```
-
-Run in a loop:
-
-```powershell
-python bumble_phone_auto.py --setup multimodalx4 --log-dir $LOG_DIR --loop --delay 4
-```
-
-Use custom Android swipe coordinates for a different screen geometry:
-
-```powershell
-python bumble_phone_auto.py --setup multimodalx4 --log-dir $LOG_DIR `
-  --left-swipe 850,1400,150,1400,250 `
-  --right-swipe 150,1400,850,1400,250
-```
-
-Use `--setup multimodalx5` for the P80 variant. If multiple Android devices are attached, pass `--serial`.
-
-## Runtime Choices
-
-Named setups keep a benchmarked artifact bundle together after a user has generated the matching local artifacts:
-
-| Setup | Main Idea |
-| --- | --- |
-| `experimental1` | Round2 face-biased score with the best top-model spline preference layer |
-| `experimental2` | Round3 face-biased comparison |
-| `multimodalx` | Formula score using ridge, multimodal, and `P(like)` with threshold decision |
-| `multimodalx2` | Formula score that also uses KNN |
-| `multimodalx3` | Round3 face-biased score with veto-style preference layer |
-| `multimodalx4` | Preferred Round3 P85 path: MultimodalX2 score with blend and veto preference layers |
-| `multimodalx5` | Preferred Round3 P80 path: tuned formula score with blend and veto preference layers |
-| `multimodalx6` | Round2 veto comparison |
-
-Use `--store`, `--regressor`, `--multimodal-regressor`, `--method`, `--face-weight`, `--preference-model`, and threshold flags when deliberately overriding a preset.
-
-Available core scoring methods are:
-
-- `knn`: weighted nearest-reference baseline.
-- `regressor`: face-only supervised regressor.
-- `multimodal`: learned multimodal regressor.
-- `face_biased`: weighted blend of face-only and multimodal regressors.
-- `multimodalx`, `multimodalx2`, `multimodalx5`: hand-tuned formula scores over score components and `P(like)`.
-
-## Build The Visual Preference Data
-
-### Dataset Specification
-
-Users procure their own training images and logs, check that their use of those materials is lawful and appropriate, and label the data for their own preferences.
-
-The rating pipeline expects a user-procured image set with:
-
-- Image files reachable from CSV paths.
-- A visible face for the InsightFace path when building face stores.
-- Low, neutral, and high preference examples across the full rating range.
-- Variation in crop, lighting, expression, pose, and profile-image context if the model should generalize beyond narrow portrait similarity.
-- A held-out validation slice reserved for evaluation.
-
-The base label CSV format is:
+The rating label CSV format is:
 
 ```csv
 path,rating_1_5,rating
@@ -302,7 +184,7 @@ data/reference_images/example_002.jpg,3,50
 data/reference_images/example_003.jpg,1,0
 ```
 
-`rating_1_5` is the human label. `rating` is its `0-100` numeric value:
+The numeric mapping used by the rating tools is:
 
 ```text
 1 = 0
@@ -312,26 +194,19 @@ data/reference_images/example_003.jpg,1,0
 5 = 100
 ```
 
-For a practical first pass, collect at least hundreds of labeled images with representation across the full rating scale. Bumble-specific calibration rounds need additional user-owned logged screenshots and labels from real decisions because live profile streams include screenshot framing and decision context beyond the base portrait labels.
-
-### Label Base Reference Images
-
-Run the labeling app over your local source image folders:
+Label local source images:
 
 ```powershell
 python label_app.py --source-dir <path-to-reference-images> --output-csv <path-to-rating-labels.csv>
 ```
 
-Keep high, low, and neutral examples so the model sees the whole preference range.
-
-Optional dataset maintenance:
+Optional label check:
 
 ```powershell
-python gender_cleanup.py --source-dir <path-to-reference-images> --provider cuda --det-thresh 0.25
 python label_audit.py --min-gap 50 --min-similarity 0.9
 ```
 
-### Build Rating Stores
+### 2. Build stores and rating models
 
 Build the face reference store:
 
@@ -350,14 +225,6 @@ python build_clip_store.py `
   --provider cuda
 ```
 
-Review failed face detections when needed:
-
-```powershell
-python export_rejected.py --labels $RATING_LABELS --provider cuda --det-thresh 0.25
-```
-
-## Train Rating Models
-
 Train face-only rating regressors:
 
 ```powershell
@@ -367,7 +234,7 @@ python train_regressor.py `
   --report results\regressor_eval.csv
 ```
 
-Train face, CLIP, and face+CLIP regressors:
+Train face, CLIP, and combined regressors:
 
 ```powershell
 python train_multimodal_regressor.py `
@@ -377,9 +244,11 @@ python train_multimodal_regressor.py `
   --report results\multimodal_regressor_eval.csv
 ```
 
-The multimodal report includes random and leak-aware validation. Prefer leak-aware comparisons when similar faces or repeated identities may exist across splits.
+Prefer leak-aware comparisons when repeated people or near-duplicate screenshots may exist across train and validation data.
 
-Score a folder manually before wiring a new model into automation:
+### 3. Score before automating
+
+Score a folder manually:
 
 ```powershell
 python score.py .\test_images `
@@ -390,27 +259,44 @@ python score.py .\test_images `
   --csv results\scores.csv
 ```
 
-## Train From Bumble Logs
+Check score distributions, prediction failures, and held-out error before connecting a new artifact set to automation.
 
-Live automation writes screenshots and `scores.csv` into the configured log directory. Keep that directory private. Those logs are the feedback loop for later Bumble-specific rounds.
+### 4. Collect screenshot-domain logs
 
-The Bumble-specific workflow expects user-owned logs with:
+Run Bumble Web once on a visible profile:
 
-- Captured profile screenshots from the automation runner.
-- A `scores.csv` written by the same run so score components, methods, thresholds, and screenshot paths can be joined later.
-- Fresh human labels for selected screenshots, either rating labels for regressor rounds or binary `like` labels for preference rounds.
-- A locked validation set selected before training new artifacts.
+```powershell
+$LOG_DIR = "<path-to-private-log-dir>"
+python bumble_auto.py --log-dir $LOG_DIR
+```
 
-### Rating Round From Logged Screenshots
+The first web run uses a persistent Playwright browser state under `.bumble_browser`. Log in there when needed and keep that state private.
 
-Prepare logged Bumble screenshots for rating labels:
+For Android, enable USB debugging and check that `adb devices` can see the phone:
+
+```powershell
+python bumble_phone_auto.py --log-dir $LOG_DIR
+```
+
+Looping is explicit:
+
+```powershell
+python bumble_auto.py --log-dir $LOG_DIR --loop --delay 4
+python bumble_phone_auto.py --log-dir $LOG_DIR --loop --delay 4
+```
+
+Logs include screenshots and a `scores.csv` with component scores, thresholds, selected setup metadata, and model paths. Treat that directory as private training material.
+
+### 5. Train screenshot rounds
+
+Prepare a logged screenshot round for five-point rating labels:
 
 ```powershell
 $RATING_ROUND = "<path-to-private-rating-round-workspace>"
 python bumble_train.py prepare --source $LOG_DIR --output $RATING_ROUND
 ```
 
-Label the selected screenshots:
+Label it:
 
 ```powershell
 python label_app.py `
@@ -419,7 +305,7 @@ python label_app.py `
   --port 7863
 ```
 
-Combine them with the base labels:
+Combine screenshot labels with the base rating labels:
 
 ```powershell
 python bumble_train.py combine-labels `
@@ -429,44 +315,18 @@ python bumble_train.py combine-labels `
   --output "$RATING_ROUND\labels\combined_train_labels.csv"
 ```
 
-Build new stores and train new regressors from that combined label file:
+Rebuild stores and regressors from the combined label file. Use explicit artifact and report names for each round so old validation results remain comparable.
 
-```powershell
-python build_references.py `
-  --labels "$RATING_ROUND\labels\combined_train_labels.csv" `
-  --output embeddings\reference_store_bumble_combined.npz `
-  --provider cuda `
-  --det-thresh 0.25
+### 6. Train a binary preference layer
 
-python build_clip_store.py `
-  --labels "$RATING_ROUND\labels\combined_train_labels.csv" `
-  --store embeddings\reference_store_bumble_combined.npz `
-  --output embeddings\clip_store_bumble_combined.npz `
-  --provider cuda
-```
-
-Then run `train_regressor.py` and `train_multimodal_regressor.py` against those new stores with explicit output/report paths.
-
-Evaluate locked Bumble labels against logged or rescored predictions:
-
-```powershell
-python bumble_train.py evaluate `
-  --labels "$RATING_ROUND\labels\bumble_labels.csv" `
-  --manifest "$RATING_ROUND\manifests\selection.csv" `
-  --split validation `
-  --output "$RATING_ROUND\reports\evaluation.csv"
-```
-
-### Binary Preference Layer
-
-Prepare historical screenshots for binary preference labels:
+Prepare screenshot-domain binary labels:
 
 ```powershell
 $PREFERENCE_ROUND = "<path-to-private-preference-round-workspace>"
 python bumble_preference.py prepare --source $LOG_DIR --output $PREFERENCE_ROUND
 ```
 
-Label binary preference decisions with the command printed by the prepare step, then train:
+Label the prepared images as binary left or right intent, then train:
 
 ```powershell
 python bumble_preference.py train `
@@ -488,9 +348,69 @@ python bumble_preference.py benchmark-models `
   --provider cuda
 ```
 
-That benchmark is the path that produced the current `experimental1` recommendation.
+### 7. Evaluate disagreement cases
 
-## Inspect Runs
+Later experiments can focus labeling on profiles where several decision paths disagree:
+
+```powershell
+python bumble_preference.py prepare-veto-eval --source $LOG_DIR --output <path-to-private-veto-workspace>
+```
+
+Use the labeling command printed by that step. Then compare the labeled veto decisions with model outputs:
+
+```powershell
+python bumble_preference.py report-veto-eval
+python bumble_preference.py benchmark-veto-layers
+```
+
+This workflow is useful when easy examples dominate the logs but the real engineering question is which decision layer handles boundary cases better.
+
+## Runtime Options
+
+Named setups in `face_similarity/experimental_setup.py` are lab presets. They are conveniences for a matching local artifact bundle, not universal recommendations. Recreate or replace the referenced stores and fitted models before expecting them to work on another machine.
+
+### Setup Lineage
+
+The setup names preserve the research path instead of rewriting it after every winner changed.
+
+| Setup | Role In The Journey |
+| --- | --- |
+| `experimental1` | Earlier Round2 face-biased stack with a binary preference layer. |
+| `experimental2` | Round3 comparison for the same preference-layer idea. |
+| `multimodalx` | Formula score that mixes rating components with an earlier `P(like)` signal. |
+| `multimodalx2` | Formula score that adds KNN into that blend. |
+| `multimodalx3` | Round3 score components with a disagreement-trained veto-style layer. |
+| `multimodalx4` | Veto layer on top of the MultimodalX2-style branch. |
+| `multimodalx5` | Another tuned formula branch tested against held-out veto labels. |
+| `multimodalx6` | Round2 revisited with the newer veto-spline decision layer. |
+
+That lineage matters because it records the question each setup was trying to answer. It also makes benchmark reports easier to audit when a simpler older branch beats a newer one on a specific validation slice.
+
+Core scoring methods are:
+
+- `knn`
+- `regressor`
+- `multimodal`
+- `face_biased`
+- formula methods such as `multimodalx`, `multimodalx2`, and `multimodalx5`
+
+Use explicit flags when overriding a preset deliberately:
+
+```text
+--store
+--regressor
+--multimodal-regressor
+--method
+--face-weight
+--preference-model
+--threshold
+--dynamic-from-logs
+--dynamic-preference-from-logs
+```
+
+Dynamic threshold flags can operate on raw score history or on preference-probability history. Keep that distinction clear when interpreting logs.
+
+## Dashboard And Inspection
 
 Open the original Gradio scoring UI:
 
@@ -498,7 +418,7 @@ Open the original Gradio scoring UI:
 python app.py
 ```
 
-Run the Next.js log dashboard:
+Run the local Next.js dashboard:
 
 ```powershell
 cd dashboard
@@ -506,7 +426,7 @@ npm install
 npm run dev
 ```
 
-Use the local URL printed by Next.js. The dashboard reads Bumble log history and gallery data from the log files used by automation.
+The dashboard reads local score history and screenshots from the automation log directory. Do not deploy a dashboard instance that exposes private logs without reviewing its access boundary.
 
 ## Repository Map
 
@@ -517,16 +437,15 @@ Use the local URL printed by Next.js. The dashboard reads Bumble log history and
 | `face_similarity/` | Embeddings, scoring, regressors, preference features, logging, thresholds |
 | `train_regressor.py` | Face-only rating model training |
 | `train_multimodal_regressor.py` | Face/CLIP/multimodal rating model training |
-| `bumble_train.py` | Bumble screenshot selection, combined labels, rating evaluation |
-| `bumble_preference.py` | Binary preference data, benchmarks, and veto experiments |
-| `models/` | Saved sklearn artifacts |
-| `embeddings/` | InsightFace and CLIP stores |
-| `results/` | Benchmarks, validation predictions, reports, and screenshots |
-| `dashboard/` | Local Next.js log dashboard |
+| `bumble_train.py` | Screenshot selection, combined labels, and rating evaluation |
+| `bumble_preference.py` | Binary preference data, benchmarks, and disagreement experiments |
+| `label_app.py` | Five-point and binary local labeling UI |
+| `dashboard/` | Local score-history dashboard |
 
-## Notes
+## Practical Notes
 
-- Keep model generation, store, regressor, multimodal regressor, and preference model together. Named setups exist to prevent mismatched artifacts.
-- Prefer held-out Bumble screenshot benchmarks over intuition when choosing the next runtime stack.
-- Rebuild stores after label, crop, embedding backend, or face-detection threshold changes.
-- Use `--provider cuda` when you want GPU failures to surface during a run.
+- Keep private screenshots, labels, logs, models, and embeddings out of public commits.
+- Hold out validation examples before tuning a new score formula or preference layer.
+- Rebuild artifact bundles after crop, label, embedding backend, or face-detection changes.
+- Treat dynamic percentile settings as a runtime calibration choice and benchmark them against real held-out decisions.
+- Prefer a simpler model when it matches the more complicated model on validation and is easier to reason about live.
