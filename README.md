@@ -2,7 +2,7 @@
   <h1>BumbleClaw</h1>
   <p><strong>Dating-app autoswipe tools trained around one person's visual preference.</strong></p>
   <p>
-    Nearly 10,000 local preference examples later: capture -> label -> embed -> train -> benchmark -> relabel the hard cases -> calibrate live decisions.
+    capture -> label -> embed -> train -> benchmark -> relabel the hard cases -> calibrate live decisions.
   </p>
   <p>
     <img alt="Python" src="https://img.shields.io/badge/Python-ML%20pipeline-3776AB?style=for-the-badge&logo=python&logoColor=white">
