@@ -1,6 +1,6 @@
 <div align="center">
   <h1>BumbleClaw</h1>
-  <p><strong>A Bumble Autoswipe tools trained around one person's visual preference.</strong></p>
+  <p><strong>Dating-app autoswipe tools trained around one person's visual preference.</strong></p>
   <p>
     Nearly 10,000 local preference examples later: capture -> label -> embed -> train -> benchmark -> relabel the hard cases -> calibrate live decisions.
   </p>
@@ -15,9 +15,9 @@
 > [!IMPORTANT]
 > The public workflow should contain the process and tools, not private screenshots, labels, embeddings, fitted models, browser state, or swipe logs from one person's trained behavior. Review tracked artifacts before publishing a clone or release.
 
-BumbleClaw is the autoswipe product I wanted for Bumble: it watches the visible profile from Bumble Web or a connected Android phone, scores the profile image with models trained on my visual preference, logs what each model component believed, and can turn that output into a left or right swipe.
+BumbleClaw is the autoswipe product I wanted for dating apps: it watches a visible profile from the web or a connected Android phone, scores the profile image with models trained on my visual preference, logs what each model component believed, and can turn that output into a left or right swipe.
 
-The local training journey grew from a small face-similarity experiment into almost 10,000 labeled preference examples, multiple Bumble-specific re-labeling rounds, binary swipe labels, held-out benchmarks, disagreement-only evaluations, and runtime threshold experiments. The repository keeps that history visible because the product only became useful by following the failures.
+The local training journey grew from a small face-similarity experiment into almost 10,000 labeled preference examples, multiple dating-app screenshot re-labeling rounds, binary swipe labels, held-out benchmarks, disagreement-only evaluations, and runtime threshold experiments. The repository keeps that history visible because the product only became useful by following the failures.
 
 It is not a public preference dataset and it is not a portable recommendation model. A model trained from one person's labels is not a general ranking of other people.
 
@@ -36,7 +36,7 @@ Users are responsible for the legality, platform rules, privacy handling, and ap
 
 | Product Surface | What It Does |
 | --- | --- |
-| Autoswipe runner | Reads Bumble Web screenshots or Android screen captures and executes swipe decisions. |
+| Autoswipe runner | Reads dating-app web screenshots or Android screen captures and executes swipe decisions. |
 | Preference scorer | Scores visual evidence with KNN, face regressors, multimodal regressors, and blend formulas. |
 | Decision engine | Chooses between score thresholds, learned preference probabilities, and dynamic runtime calibration. |
 | Training loop | Selects logged screenshots for new ratings, binary swipe labels, and disagreement checks. |
@@ -44,7 +44,7 @@ Users are responsible for the legality, platform rules, privacy handling, and ap
 
 ## The Journey
 
-This repo did not begin as a grand autoswipe system. It started as a face-similarity rater and got more complicated only when the next benchmark or live Bumble session exposed a specific gap.
+This repo did not begin as a grand autoswipe system. It started as a face-similarity rater and got more complicated only when the next benchmark or live dating-app session exposed a specific gap.
 
 ```text
 face similarity
@@ -62,9 +62,9 @@ face similarity
 | --- | --- | --- |
 | 1. Face-similarity baseline | Start with KNN over labeled InsightFace embeddings. | First prove that my labels could produce a repeatable ranking signal before training heavier models. |
 | 2. Face rating model | Train supervised face regressors from the 1-5 visual ratings. | Nearest-neighbor similarity was interpretable but too brittle; a smoother learned score reduced dependence on single references. |
-| 3. Multimodal rating model | Add CLIP image signals beside face embeddings. | Bumble is not a clean portrait benchmark: crop, pose, lighting, app framing, and image context influence the screenshots the product actually sees. |
+| 3. Multimodal rating model | Add CLIP image signals beside face embeddings. | Dating-app screenshots are not clean portrait benchmarks: crop, pose, lighting, app framing, and image context influence the screenshots the product actually sees. |
 | 4. Face-biased blend | Combine face and multimodal ratings instead of trusting one alone. | The product needed an explicit tradeoff between facial preference and broader screenshot semantics. |
-| 5. Bumble screenshot rounds | Curate logged Bumble screenshots, crop them, label them again, and merge them into training rounds. | Real Bumble images exposed distribution shift from the original reference pool, so the data loop moved closer to runtime inputs. |
+| 5. Dating-app screenshot rounds | Curate logged profile screenshots, crop them, label them again, and merge them into training rounds. | Real app screenshots exposed distribution shift from the original reference pool, so the data loop moved closer to runtime inputs. |
 | 6. Threshold calibration | Replace one fixed right-swipe boundary with score percentiles over recent logs. | A score cutoff that behaved well in one pool could become too strict or too permissive as the shown profile stream changed. |
 | 7. Binary swipe preference layer | Train `P(like)` from score components and actual left/right intent. | A five-point attractiveness score and a real swipe decision are related but not the same target. |
 | 8. Formula branches | Test MultimodalX mixes of ridge, multimodal, KNN, and learned probability signals. | I wanted to know whether component blends could improve swipe decisions without hiding the score anatomy. |
@@ -86,7 +86,7 @@ The public README intentionally avoids publishing private labels and local valid
 
 One of the most important findings from this project is that the mathematically strongest model on a held-out table is not automatically the model that feels best in a stochastic live product.
 
-A benchmark compresses behavior into metrics such as error rate, precision, recall, and calibration. Those numbers matter; they prevented me from trusting vibes alone. But the Bumble autoswipe loop is experienced as a stream of decisions. Two models can have similar aggregate quality while producing very different error shapes:
+A benchmark compresses behavior into metrics such as error rate, precision, recall, and calibration. Those numbers matter; they prevented me from trusting vibes alone. But a dating-app autoswipe loop is experienced as a stream of decisions. Two models can have similar aggregate quality while producing very different error shapes:
 
 - one model may make fewer total mistakes but disappoint more often on the profiles I care about;
 - another may be slightly weaker on a benchmark yet feel more aligned in live browsing because its misses are less costly to my satisfaction;
@@ -113,7 +113,7 @@ The rating pipeline answers a question like "what numeric visual score would thi
 
 ### Screenshot-domain mismatch
 
-Clean reference photos and Bumble screenshots are not the same input distribution. Screenshot rounds exist to test crops, app chrome, visible text, framing, low-quality logs, and profiles near the decision boundary. Keep locked validation examples before training new screenshot rounds.
+Clean reference photos and dating-app screenshots are not the same input distribution. Screenshot rounds exist to test crops, app chrome, visible text, framing, low-quality logs, and profiles near the decision boundary. Keep locked validation examples before training new screenshot rounds.
 
 ### Calibration drift
 
@@ -289,7 +289,7 @@ Check score distributions, prediction failures, and held-out error before connec
 
 ### 4. Collect screenshot-domain logs
 
-Run Bumble Web once on a visible profile:
+Run the web autoswipe path once on a visible dating-app profile:
 
 ```powershell
 $LOG_DIR = "<path-to-private-log-dir>"
@@ -458,7 +458,7 @@ The dashboard reads local score history and screenshots from the automation log 
 
 | Path | Purpose |
 | --- | --- |
-| `bumble_auto.py` | Bumble Web screenshot, score, decision, and keyboard automation |
+| `bumble_auto.py` | Web profile screenshot, score, decision, and keyboard automation |
 | `bumble_phone_auto.py` | Android screenshot, score, decision, and ADB swipe automation |
 | `face_similarity/` | Embeddings, scoring, regressors, preference features, logging, thresholds |
 | `train_regressor.py` | Face-only rating model training |
@@ -475,3 +475,7 @@ The dashboard reads local score history and screenshots from the automation log 
 - Rebuild artifact bundles after crop, label, embedding backend, or face-detection changes.
 - Treat dynamic percentile settings as a runtime calibration choice and benchmark them against real held-out decisions.
 - Prefer a simpler model when it matches the more complicated model on validation and is easier to reason about live.
+
+## Final Warning
+
+This repository is shared for educational research and process replication. It is not a guarantee of platform safety, recommendation quality, match outcomes, or compliance with any dating app's rules. Do your own research and use it at your own risk.

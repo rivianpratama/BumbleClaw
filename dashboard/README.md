@@ -1,6 +1,6 @@
 # BumbleClaw Dashboard
 
-This Next.js app is a local inspection surface for BumbleClaw automation logs. It reads score history, setup metadata, screenshots, threshold state, and gallery data from the local automation workflow so model behavior can be checked after a run.
+This Next.js app is a local inspection surface for dating-app automation logs. It reads score history, setup metadata, screenshots, threshold state, and gallery data from the local automation workflow so model behavior can be checked after a run.
 
 The dashboard is intended for private local data. Score logs and screenshots can reveal personal information; review the log directory and network boundary before exposing the app outside the machine that owns those files.
 
