@@ -254,9 +254,14 @@ export default function GalleryPage() {
                 Intel Gallery
              </h1>
            </div>
-           <Link href="/" className="bg-white/5 hover:bg-white/10 border border-white/10 transition-colors px-6 py-3 rounded-xl text-xs font-bold tracking-widest uppercase flex items-center gap-3">
-             <span className="text-lg leading-none">←</span> Back to Matrix
-           </Link>
+           <div className="flex gap-3">
+             <Link href="/sandbox" className="bg-white/5 hover:bg-white/10 border border-white/10 transition-colors px-6 py-3 rounded-xl text-xs font-bold tracking-widest uppercase flex items-center gap-2">
+               🧪 Profile Sandbox
+             </Link>
+             <Link href="/" className="bg-white/5 hover:bg-white/10 border border-white/10 transition-colors px-6 py-3 rounded-xl text-xs font-bold tracking-widest uppercase flex items-center gap-3">
+               <span className="text-lg leading-none">←</span> Back to Matrix
+             </Link>
+           </div>
         </header>
 
         {/* Controls Bar */}

@@ -468,6 +468,11 @@ def parse_args() -> argparse.Namespace:
         help="Binary veto labels from label_app.py",
     )
     veto_benchmark.add_argument(
+        "--original-components",
+        default=r"D:\BumbleDecisionEval\cache\original__veto_components.csv",
+        help="Original veto component cache for labeled veto screenshots",
+    )
+    veto_benchmark.add_argument(
         "--round2-components",
         default=r"D:\BumbleDecisionEval\cache\bumble_combined_round2__veto_components.csv",
         help="Round2 veto component cache from prepare-veto-eval",
@@ -491,6 +496,11 @@ def parse_args() -> argparse.Namespace:
         "--calibration-output",
         default=r"D:\BumbleDecisionEval\reports\veto_decision_layer_bucket_calibration.csv",
         help="Winning decision layer bucket calibration output",
+    )
+    veto_benchmark.add_argument(
+        "--original-model-output",
+        default=r"models\bumble_preference_experimental3.joblib",
+        help="Deployable Original veto-layer model output",
     )
     veto_benchmark.add_argument(
         "--round2-model-output",
@@ -990,12 +1000,14 @@ def benchmark_veto_layers(args: argparse.Namespace) -> None:
         raise ValueError("--target-right-rate must be between 0 and 1")
 
     manifest_rows = joined_labeled_rows(Path(args.manifest), Path(args.labels))
+    original_component_rows = read_csv(Path(args.original_components))
     round2_component_rows = read_csv(Path(args.round2_components))
     round3_component_rows = read_csv(Path(args.round3_components))
     benchmark_rows = []
     best_layers: dict[str, tuple[dict[str, object], np.ndarray, list[dict[str, str]], np.ndarray]] = {}
 
     for lane, component_rows in (
+        ("Original", original_component_rows),
         ("Round2", round2_component_rows),
         ("Round3", round3_component_rows),
         ("MultimodalX2", round3_component_rows),
@@ -1066,11 +1078,27 @@ def benchmark_veto_layers(args: argparse.Namespace) -> None:
         model_name="round2_veto_spline",
         random_state=args.random_state,
     )
+    original_row = next(
+        row
+        for row in benchmark_rows
+        if row["lane"] == "Original"
+        and row["strategy"] == "retrained_layer"
+        and row["model"] == "spline_logistic"
+    )
+    original_rows = veto_layer_rows(manifest_rows, original_component_rows, lane="Original")
+    save_veto_spline_model(
+        Path(args.original_model_output),
+        original_rows,
+        original_row,
+        model_name="experimental3_original_veto_spline",
+        random_state=args.random_state,
+    )
 
     print(f"Labeled veto disagreement screenshot(s): {len(manifest_rows)}")
     print(f"Saved veto decision layer benchmark to {args.output}")
     print(f"Saved best veto decision layers to {args.best_output}")
     print(f"Saved winning layer calibration to {args.calibration_output}")
+    print(f"Saved Experimental3 Original spline veto layer to {args.original_model_output}")
     print(f"Saved Round2 veto layer to {args.round2_model_output}")
     print(f"Saved MultimodalX3 Round3 veto layer to {args.model_output}")
     print(f"Saved MultimodalX4 MultimodalX2 veto layer to {args.multimodalx4_model_output}")
@@ -1676,6 +1704,12 @@ def veto_layer_rows(
         action_field = "multimodalx2_action"
         face_weight = MULTIMODALX2.face_weight
         knn_field = "knn_k9"
+    elif lane == "Original":
+        score_field = ""
+        threshold_field = ""
+        action_field = ""
+        face_weight = 0.50
+        knn_field = "knn_k11"
     else:
         raise ValueError(f"Unknown veto layer lane: {lane}")
 
@@ -1687,9 +1721,16 @@ def veto_layer_rows(
         ridge = component_number(component, "ridge")
         multimodal = component_number(component, "multimodal")
         knn = component_number(component, knn_field)
-        score = component_number(row, score_field)
-        threshold = EXPERIMENTAL1.threshold if lane == "Round2" else component_number(row, threshold_field)
         face_biased = biased_multimodal_score(ridge, multimodal, face_weight=face_weight)
+        score = face_biased if lane == "Original" else component_number(row, score_field)
+        threshold = (
+            55.0
+            if lane == "Original"
+            else EXPERIMENTAL1.threshold
+            if lane == "Round2"
+            else component_number(row, threshold_field)
+        )
+        action = ("right" if score >= threshold else "left") if lane == "Original" else row.get(action_field, "")
         features = make_features(
             {
                 "score": score,
@@ -1708,7 +1749,7 @@ def veto_layer_rows(
                 "timestamp": row.get("timestamp", ""),
                 "screenshot": row.get("screenshot", ""),
                 "selected_path": row.get("selected_path", ""),
-                "action": row.get(action_field, ""),
+                "action": action,
                 "like": row["like"],
                 "score": format_float(score),
                 "face_biased": format_float(face_biased),
@@ -2108,21 +2149,27 @@ def train_preference_candidates(
 ) -> list[tuple[EvalResult, np.ndarray]]:
     x_train = feature_matrix(train_rows)
     x_validation = feature_matrix(validation_rows)
-    estimators = {
-        "bucket_like_rate": BucketLikeRateClassifier(score_index=FEATURE_FIELDS.index("score")),
-        "spline_logistic": spline_logistic(random_state=random_state),
-        "gradient_boosting": make_pipeline(
-            SimpleImputer(strategy="median"),
-            HistGradientBoostingClassifier(max_iter=160, learning_rate=0.04, random_state=random_state),
-        ),
-    }
     results = []
-    for name, estimator in estimators.items():
+    for name in ("bucket_like_rate", "spline_logistic", "gradient_boosting"):
+        estimator = veto_candidate_estimator(name, random_state=random_state)
         estimator.fit(x_train, y_train)
         probabilities = estimator.predict_proba(x_validation)[:, 1]
         threshold = probability_threshold_for_rate(probabilities, target_right_rate)
         results.append((evaluate_probabilities(name, y_validation, probabilities, threshold), probabilities))
     return results
+
+
+def veto_candidate_estimator(model: str, *, random_state: int):
+    if model == "bucket_like_rate":
+        return BucketLikeRateClassifier(score_index=FEATURE_FIELDS.index("score"))
+    if model == "spline_logistic":
+        return spline_logistic(random_state=random_state)
+    if model == "gradient_boosting":
+        return make_pipeline(
+            SimpleImputer(strategy="median"),
+            HistGradientBoostingClassifier(max_iter=160, learning_rate=0.04, random_state=random_state),
+        )
+    raise ValueError(f"Unknown veto candidate model: {model}")
 
 
 def fit_veto_x3_spline(
@@ -2154,6 +2201,35 @@ def save_veto_spline_model(
     random_state: int,
 ) -> None:
     estimator = spline_logistic(random_state=random_state)
+    x, y = matrix(rows)
+    estimator.fit(x, y)
+    save_preference_model(
+        output,
+        estimator=estimator,
+        model_name=model_name,
+        threshold=parse_float(validation_row.get("probability_threshold"), 0.493593) or 0.493593,
+        metrics={
+            "swipe_error_rate": parse_float(validation_row.get("swipe_error_rate"), 0.0) or 0.0,
+            "right_swipe_rate": parse_float(validation_row.get("right_swipe_rate"), 0.0) or 0.0,
+            "precision": parse_float(validation_row.get("precision"), 0.0) or 0.0,
+            "recall": parse_float(validation_row.get("recall"), 0.0) or 0.0,
+            "auc": parse_float(validation_row.get("auc"), 0.0) or 0.0,
+            "log_loss": parse_float(validation_row.get("log_loss"), 0.0) or 0.0,
+            "validation_count": parse_float(validation_row.get("count"), 0.0) or 0.0,
+            "training_count": float(len(rows)),
+        },
+    )
+
+
+def save_veto_candidate_model(
+    output: Path,
+    rows: list[dict[str, str]],
+    validation_row: dict[str, object],
+    *,
+    model_name: str,
+    random_state: int,
+) -> None:
+    estimator = veto_candidate_estimator(str(validation_row.get("model", "")), random_state=random_state)
     x, y = matrix(rows)
     estimator.fit(x, y)
     save_preference_model(

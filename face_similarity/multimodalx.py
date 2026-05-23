@@ -5,7 +5,8 @@ from face_similarity.prediction import RatingPrediction
 METHOD = "multimodalx"
 METHOD2 = "multimodalx2"
 METHOD5 = "multimodalx5"
-METHODS = (METHOD, METHOD2, METHOD5)
+ORIGINAL_METHOD = "multimodalx_original"
+METHODS = (METHOD, METHOD2, METHOD5, ORIGINAL_METHOD)
 PREFERENCE_FEATURE_THRESHOLD = 55.0
 RIDGE_WEIGHT = 0.73
 MULTIMODAL_WEIGHT = 0.20
@@ -19,6 +20,9 @@ MULTIMODALX5_MULTIMODAL_WEIGHT = 0.05
 MULTIMODALX5_P_LIKE_WEIGHT = 0.15
 MULTIMODALX5_KNN_WEIGHT = 0.20
 MULTIMODALX5_OLD_P_LIKE_FACE_WEIGHT = 0.30
+ORIGINAL_RIDGE_WEIGHT = 0.48
+ORIGINAL_MULTIMODAL_WEIGHT = 0.48
+ORIGINAL_P_LIKE_WEIGHT = 0.04
 
 
 def score(ridge: float, multimodal: float, p_like: float, *, knn: float | None = None, method: str = METHOD) -> float:
@@ -45,6 +49,12 @@ def score(ridge: float, multimodal: float, p_like: float, *, knn: float | None =
             + MULTIMODALX5_MULTIMODAL_WEIGHT * multimodal
             + MULTIMODALX5_P_LIKE_WEIGHT * p_like * 100.0
             + MULTIMODALX5_KNN_WEIGHT * knn
+        )
+    if method == ORIGINAL_METHOD:
+        return float(
+            ORIGINAL_RIDGE_WEIGHT * ridge
+            + ORIGINAL_MULTIMODAL_WEIGHT * multimodal
+            + ORIGINAL_P_LIKE_WEIGHT * p_like * 100.0
         )
     raise ValueError(f"Unknown MultimodalX method: {method}")
 

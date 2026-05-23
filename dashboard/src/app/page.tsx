@@ -10,7 +10,7 @@ type ScoreData = {
   methodDistribution: Record<string, number>;
   scoreDistribution: Record<string, number>;
   velocity: number;
-  latest: { score: number | null; face_biased: number | null; multimodal: number | null; ridge: number | null; knn: number | null; action: string | null; setup_name: string | null; method: string | null; decision_mode: string | null; preference_probability: number | null; preference_threshold: number | null; divergence: number | null; screenshot: string | null; } | null;
+  latest: { final_score: number | null; base_score: number | null; face_biased: number | null; multimodal: number | null; ridge: number | null; knn: number | null; action: string | null; setup_name: string | null; method: string | null; decision_mode: string | null; preference_probability: number | null; preference_threshold: number | null; divergence: number | null; screenshot: string | null; } | null;
   activeSetup?: { name: string | null; decisionMode: string; preferenceModelPath: string | null; faceWeight: string | null };
   dynamicThreshold: {
     enabled: boolean;
@@ -129,7 +129,7 @@ export default function Dashboard() {
   const finalThresholdScale = isPreferenceMode ? 100 : 1;
   const topMethods = Object.entries(data.methodDistribution).sort((a, b) => b[1] - a[1]);
   const modelMetrics = [
-    { key: 'face_biased', title: 'Face Biased', subtitle: 'Aesthetic Focus', color: '#a78bfa' },
+    { key: 'face_biased', title: 'Base Face Biased', subtitle: 'Pre-Veto Blend', color: '#a78bfa' },
     { key: 'multimodal', title: 'Multimodal', subtitle: 'Vision + Text', color: '#38bdf8' },
     { key: 'ridge', title: 'Ridge', subtitle: 'Linear Model', color: '#fbbf24' },
     { key: 'knn', title: 'k-NN', subtitle: 'Similarity', color: '#fb7185' },
@@ -179,6 +179,10 @@ export default function Dashboard() {
               <span className="summary-label">Total Processed</span>
               <span className="summary-value">{totalRecords.toLocaleString()}</span>
             </div>
+            <Link href="/sandbox" className="gallery-link">
+              <span className="summary-label">Manual Test</span>
+              <span className="gallery-title">Profile Sandbox</span>
+            </Link>
             <Link href="/gallery" className="gallery-link">
               <span className="summary-label">Access Repository</span>
               <span className="gallery-title">View Gallery</span>
@@ -200,7 +204,7 @@ export default function Dashboard() {
                 <div className="preview-shade" />
                   
                 <div className="preview-metrics">
-                    {[{l:'Multi', v:data.latest.multimodal}, {l:'Ridge', v:data.latest.ridge}, {l:'KNN', v:data.latest.knn}].map(m => (
+                    {[{l:'Base', v:data.latest.base_score}, {l:'Multi', v:data.latest.multimodal}, {l:'Ridge', v:data.latest.ridge}, {l:'KNN', v:data.latest.knn}].map(m => (
                     <div key={m.l} className="mini-metric">
                       <span className="mini-metric-label">{m.l}</span>
                       <span className="mini-metric-value">{formatNumber(m.v)}</span>
@@ -212,7 +216,7 @@ export default function Dashboard() {
                   <div>
                     <span className="score-caption">Final Score</span>
                     <span className="score-value">
-                          {formatNumber(data.latest.score)}
+                          {formatNumber(data.latest.final_score)}
                         </span>
                       </div>
                       {data.latest.action && (
@@ -322,7 +326,7 @@ export default function Dashboard() {
                     const filteredTrend = data.trend ? data.trend.filter(t => t.time >= minTime) : [];
                     
                     const trendScale = isPreferenceMode ? 100 : 1;
-                    const currentVal = (data.trend.length > 0 ? data.trend[data.trend.length - 1].threshold : 54) * trendScale;
+                    const currentVal = (data.trend.length > 0 ? data.trend[data.trend.length - 1].threshold : 55) * trendScale;
 
                     // Downsample the data into 80 time-based buckets (approx every 10px on a standard screen)
                     const bucketCount = 80;
@@ -484,8 +488,8 @@ export default function Dashboard() {
             <section className="model-section">
               <div className="panel overall-card">
                 <div>
-                  <h3 className="section-label">Blended Final Score</h3>
-                  <h2 className="overall-title">Overall Output (Global Avg)</h2>
+                  <h3 className="section-label">CLI Final Score</h3>
+                  <h2 className="overall-title">Final Output Average</h2>
                 </div>
                 <span className="overall-value font-mono">
                   {formatNumber(data.averages.score)}

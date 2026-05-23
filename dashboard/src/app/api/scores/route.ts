@@ -5,12 +5,12 @@ import { getBumbleLogFilePath } from '@/lib/bumbleLog';
 export const dynamic = 'force-dynamic';
 
 const DYNAMIC_THRESHOLD = {
-  fallbackThreshold: 54,
+  fallbackThreshold: 55,
   targetRightRate: 0.25,
   window: 200,
   minHistory: 50,
   minThreshold: 48,
-  maxThreshold: 62,
+  maxThreshold: 70,
 };
 
 const DYNAMIC_PREFERENCE_THRESHOLD = {
@@ -56,7 +56,8 @@ type ParsedScoreRow = {
 };
 
 type LatestScore = {
-  score: number | null;
+  final_score: number | null;
+  base_score: number | null;
   face_biased: number | null;
   multimodal: number | null;
   ridge: number | null;
@@ -285,7 +286,8 @@ export async function GET(request: Request) {
       }
       
       latestScore = {
-        score: finalScore,
+        final_score: finalScore,
+        base_score: parsedRow.score,
         face_biased: isNaN(fb) ? null : fb,
         multimodal: isNaN(mm) ? null : mm,
         ridge: isNaN(rg) ? null : rg,

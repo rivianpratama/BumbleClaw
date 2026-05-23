@@ -3,8 +3,13 @@ from __future__ import annotations
 from functools import lru_cache
 import os
 from pathlib import Path
+import shutil
+import sys
+import tempfile
 
-import gradio as gr
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 
 from face_similarity.clip_embedding import get_clip_embedding
 from face_similarity.embedding import get_face_embedding
@@ -15,439 +20,395 @@ from face_similarity.regressor import (
 )
 from face_similarity.scoring import score_embedding
 from face_similarity.store import load_store
+from face_similarity.experimental_setup import EXPERIMENTAL_SETUPS
+from face_similarity.preference import load_preference_model, preference_probability, features_from_prediction
 
-STORE_PATH = "embeddings/reference_store_bumble_combined_round2.npz"
-REGRESSOR_PATH = "models/rating_regressor_bumble_combined_round2.joblib"
-MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal_bumble_combined_round2.joblib"
-ORIGINAL_REGRESSOR_PATH = "models/rating_regressor.joblib"
-ORIGINAL_MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal.joblib"
-ROUND1_REGRESSOR_PATH = "models/rating_regressor_bumble_combined.joblib"
-ROUND1_MULTIMODAL_REGRESSOR_PATH = "models/rating_regressor_multimodal_bumble_combined.joblib"
+app = FastAPI(title="BumbleClaw Image Analysis API", version="1.0.0")
+
+# Enable CORS for Next.js frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Standard Regressor/Epoch configurations
+BASE_MODELS_CONFIG = {
+    "original": {
+        "name": "Original Model (7k)",
+        "regressor": "models/rating_regressor.joblib",
+        "multimodal": "models/rating_regressor_multimodal.joblib",
+        "store": "embeddings/reference_store.npz",
+        "face_weight": 0.50
+    },
+    "round1": {
+        "name": "Round 1 Model (Combined)",
+        "regressor": "models/rating_regressor_bumble_combined.joblib",
+        "multimodal": "models/rating_regressor_multimodal_bumble_combined.joblib",
+        "store": "embeddings/reference_store_bumble_combined.npz",
+        "face_weight": 0.50
+    },
+    "round2": {
+        "name": "Round 2 Model (Combined)",
+        "regressor": "models/rating_regressor_bumble_combined_round2.joblib",
+        "multimodal": "models/rating_regressor_multimodal_bumble_combined_round2.joblib",
+        "store": "embeddings/reference_store_bumble_combined_round2.npz",
+        "face_weight": 0.22
+    },
+    "round3": {
+        "name": "Round 3 Model (Latest Combined)",
+        "regressor": "models/rating_regressor_bumble_combined_round3.joblib",
+        "multimodal": "models/rating_regressor_multimodal_bumble_combined_round3.joblib",
+        "store": "embeddings/reference_store_bumble_combined_round3.npz",
+        "face_weight": 0.44
+    },
+    "bumble_only": {
+        "name": "Bumble Only Model (Round 1)",
+        "regressor": "models/rating_regressor_bumble_only.joblib",
+        "multimodal": "models/rating_regressor_multimodal_bumble_only.joblib",
+        "store": "embeddings/reference_store_bumble_only.npz",
+        "face_weight": 0.50
+    },
+    "bumble_only_round2": {
+        "name": "Bumble Only Model (Round 2)",
+        "regressor": "models/rating_regressor_bumble_only_round2.joblib",
+        "multimodal": "models/rating_regressor_multimodal_bumble_only_round2.joblib",
+        "store": "embeddings/reference_store_bumble_only_round2.npz",
+        "face_weight": 0.22
+    }
+}
+
 TOP_K = 20
-BIASED_FACE_WEIGHT = 0.22
-COMPARISON_FACE_WEIGHT = 0.50
-SWIPE_THRESHOLD = 54.0
+SWIPE_THRESHOLD = 55.0
 SERVER_PORT = int(os.environ.get("BUMBLECLAW_PORT", "7860"))
 
-CSS = """
-body {
-    background: #f7f7f4;
-}
+@lru_cache(maxsize=16)
+def cached_store(path: str):
+    if not Path(path).exists():
+        return None
+    return load_store(path)
 
-.gradio-container {
-    max-width: 1080px !important;
-    margin: 0 auto;
-}
-
-#app-shell {
-    min-height: 100vh;
-}
-
-#title {
-    margin: 10px 0 8px;
-}
-
-#title h1 {
-    font-size: 24px;
-    line-height: 1.15;
-    margin: 0;
-    letter-spacing: 0;
-}
-
-#image-input {
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-#score-panel {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 10px;
-}
-
-.score-card {
-    background: #ffffff;
-    border: 1px solid #deded8;
-    border-radius: 8px;
-    padding: 12px;
-}
-
-.score-label {
-    color: #64645d;
-    font-size: 13px;
-    line-height: 1.2;
-    margin-bottom: 6px;
-}
-
-.score-value {
-    color: #181813;
-    font-size: 30px;
-    line-height: 1;
-    font-weight: 700;
-    letter-spacing: 0;
-}
-
-.score-meta {
-    color: #64645d;
-    font-size: 12px;
-    line-height: 1.3;
-    margin-top: 6px;
-}
-
-.score-compare {
-    color: #3f3f39;
-    font-size: 12px;
-    line-height: 1.3;
-    margin-top: 8px;
-}
-
-.score-compare.primary {
-    color: #1f5132;
-}
-
-.score-compare.right {
-    color: #1f5132;
-}
-
-.score-compare.left {
-    color: #6f251c;
-}
-
-.score-error {
-    background: #fff4f2;
-    border: 1px solid #e4b3aa;
-    border-radius: 8px;
-    color: #5f2118;
-    padding: 12px;
-}
-
-#nearest-panel {
-    margin-top: 6px;
-}
-
-@media (max-width: 720px) {
-    .gradio-container {
-        padding: 8px !important;
-    }
-
-    #title {
-        display: none;
-    }
-
-    #app-shell {
-        gap: 8px;
-    }
-
-    #score-panel {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px;
-    }
-
-    .score-card {
-        padding: 10px;
-    }
-
-    .score-label {
-        font-size: 12px;
-    }
-
-    .score-value {
-        font-size: 22px;
-    }
-
-    .score-compare {
-        font-size: 11px;
-    }
-
-    #nearest-panel {
-        display: none;
-    }
-}
-"""
-
-
-def analyze(image_path: str) -> tuple[str, str]:
-    if not image_path:
-        return empty_scores(), ""
-
-    try:
-        store = cached_store()
-        embedding = get_face_embedding(
-            image_path,
-            model_name=store.model_name,
-            provider=store.provider,
-            det_size=store.det_size,
-            det_thresh=store.det_thresh,
-            enforce_detection=True,
-        )
-        result = score_embedding(embedding, store.embeddings, store.ratings, k=TOP_K)
-        regressor_text = "Not trained"
-        regressor_rating = None
-        regressor = cached_regressor(REGRESSOR_PATH)
-        if regressor is not None:
-            regressor_rating = predict_rating(regressor, embedding)
-            regressor_text = regressor.model_name
-        multimodal_text = "Not trained"
-        multimodal_rating = None
-        clip_embedding = None
-        multimodal = cached_regressor(MULTIMODAL_REGRESSOR_PATH)
-        if multimodal is not None:
-            try:
-                clip_model = multimodal.metadata.get("clip_model", "openai/clip-vit-base-patch32")
-                clip_embedding = get_clip_embedding(image_path, model_name=clip_model, provider="auto")
-                multimodal_rating = predict_multimodal_rating(
-                    multimodal,
-                    face_embedding=embedding,
-                    clip_embedding=clip_embedding,
-                )
-                multimodal_text = multimodal.model_name
-            except Exception:
-                multimodal_text = "Unavailable"
-        original_face_biased = comparison_face_biased_score(
-            embedding,
-            clip_embedding,
-            face_regressor_path=ORIGINAL_REGRESSOR_PATH,
-            multimodal_regressor_path=ORIGINAL_MULTIMODAL_REGRESSOR_PATH,
-        )
-        round1_face_biased = comparison_face_biased_score(
-            embedding,
-            clip_embedding,
-            face_regressor_path=ROUND1_REGRESSOR_PATH,
-            multimodal_regressor_path=ROUND1_MULTIMODAL_REGRESSOR_PATH,
-        )
-    except Exception as exc:
-        return error_scores(str(exc)), ""
-
-    nearest_lines = []
-    for index, similarity in zip(result.nearest_indices, result.nearest_similarities):
-        nearest_lines.append(
-            f"- {Path(store.paths[index]).name}: rating {store.ratings[index]:.0f}, similarity {similarity:.4f}"
-        )
-
-    nearest_text = "\n".join(nearest_lines)
-    details = (
-        f"### Nearest references\n{nearest_text}\n\n"
-        f"Max similarity: `{result.max_similarity:.4f}`  \n"
-        f"Mean similarity: `{result.mean_similarity:.4f}`  \n"
-        f"References: `{len(store.embeddings)}`"
-    )
-    return (
-        score_cards(
-            knn_rating=result.rating,
-            regressor_rating=regressor_rating,
-            regressor_name=regressor_text,
-            multimodal_rating=multimodal_rating,
-            multimodal_name=multimodal_text,
-            original_face_biased=original_face_biased,
-            round1_face_biased=round1_face_biased,
-            max_similarity=result.max_similarity,
-        ),
-        details,
-    )
-
-
-@lru_cache(maxsize=1)
-def cached_store():
-    return load_store(STORE_PATH)
-
-
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=32)
 def cached_regressor(path: str):
     if not Path(path).exists():
         return None
     return load_regressor(path)
 
-
-def empty_scores() -> str:
-    return f"""
-    <div id="score-panel">
-      <div class="score-card">
-        <div class="score-label">Decision</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">Threshold {SWIPE_THRESHOLD:.2f}</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">Face-Biased</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">22% Ridge + 78% multi</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">7k Face-Bias</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">22% Ridge + 78% multi</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">R1 Face-Bias</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">22% Ridge + 78% multi</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">Multimodal</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">CLIP + face</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">Ridge</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">Upload image</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">KNN</div>
-        <div class="score-value">--</div>
-        <div class="score-meta">K = 20</div>
-      </div>
-    </div>
-    """
-
-
-def error_scores(message: str) -> str:
-    return f'<div class="score-error">{message}</div>'
-
-
-def score_cards(
-    *,
-    knn_rating: float,
-    regressor_rating: float | None,
-    regressor_name: str,
-    multimodal_rating: float | None,
-    multimodal_name: str,
-    original_face_biased: float | None,
-    round1_face_biased: float | None,
-    max_similarity: float,
-) -> str:
-    ridge_value = "--" if regressor_rating is None else f"{regressor_rating:.1f}"
-    multimodal_value = "--" if multimodal_rating is None else f"{multimodal_rating:.1f}"
-    biased_rating = biased_multimodal_score(regressor_rating, multimodal_rating)
-    biased_value = "--" if biased_rating is None else f"{biased_rating:.1f}"
-    biased_compare = comparison_text(biased_rating, regressor_rating)
-    decision_value, decision_compare, decision_class = decision_text(biased_rating)
-    original_value = "--" if original_face_biased is None else f"{original_face_biased:.1f}"
-    round1_value = "--" if round1_face_biased is None else f"{round1_face_biased:.1f}"
-    original_compare = comparison_text(original_face_biased, biased_rating)
-    round1_compare = comparison_text(round1_face_biased, biased_rating)
-    multimodal_compare = comparison_text(multimodal_rating, regressor_rating)
-    knn_compare = comparison_text(knn_rating, regressor_rating)
-    return f"""
-    <div id="score-panel">
-      <div class="score-card">
-        <div class="score-label">Decision</div>
-        <div class="score-value">{decision_value}</div>
-        <div class="score-meta">Threshold {SWIPE_THRESHOLD:.2f}</div>
-        <div class="score-compare {decision_class}">{decision_compare}</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">Face-Biased</div>
-        <div class="score-value">{biased_value}</div>
-        <div class="score-meta">{BIASED_FACE_WEIGHT:.0%} Ridge + {1 - BIASED_FACE_WEIGHT:.0%} multi</div>
-        <div class="score-compare">{biased_compare}</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">7k Face-Bias</div>
-        <div class="score-value">{original_value}</div>
-        <div class="score-meta">22% Ridge + 78% multi</div>
-        <div class="score-compare">{original_compare}</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">R1 Face-Bias</div>
-        <div class="score-value">{round1_value}</div>
-        <div class="score-meta">22% Ridge + 78% multi</div>
-        <div class="score-compare">{round1_compare}</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">Multimodal</div>
-        <div class="score-value">{multimodal_value}</div>
-        <div class="score-meta">{multimodal_name}</div>
-        <div class="score-compare">{multimodal_compare}</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">Ridge</div>
-        <div class="score-value">{ridge_value}</div>
-        <div class="score-meta">{regressor_name}</div>
-        <div class="score-compare primary">baseline comparison</div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">KNN</div>
-        <div class="score-value">{knn_rating:.1f}</div>
-        <div class="score-meta">K = {TOP_K} | max {max_similarity:.3f}</div>
-        <div class="score-compare">{knn_compare}</div>
-      </div>
-    </div>
-    """
-
+@lru_cache(maxsize=16)
+def cached_preference_model(path: str):
+    if not Path(path).exists():
+        return None
+    return load_preference_model(path)
 
 def biased_multimodal_score(
     regressor_rating: float | None,
     multimodal_rating: float | None,
     *,
-    face_weight: float = BIASED_FACE_WEIGHT,
+    face_weight: float,
 ) -> float | None:
     if regressor_rating is None or multimodal_rating is None:
         return None
     return face_weight * regressor_rating + (1 - face_weight) * multimodal_rating
 
-
-def comparison_face_biased_score(
-    embedding,
-    clip_embedding,
-    *,
-    face_regressor_path: str,
-    multimodal_regressor_path: str,
-) -> float | None:
-    if clip_embedding is None:
-        return None
-    face_regressor = cached_regressor(face_regressor_path)
-    multimodal_regressor = cached_regressor(multimodal_regressor_path)
-    if face_regressor is None or multimodal_regressor is None:
-        return None
-    face_rating = predict_rating(face_regressor, embedding)
-    multimodal_rating = predict_multimodal_rating(
-        multimodal_regressor,
-        face_embedding=embedding,
-        clip_embedding=clip_embedding,
-    )
-    return biased_multimodal_score(
-        face_rating,
-        multimodal_rating,
-        face_weight=COMPARISON_FACE_WEIGHT,
-    )
-
-
-def comparison_text(score: float | None, ridge_score: float | None) -> str:
-    if score is None or ridge_score is None:
+def comparison_text(score: float | None, base_score: float | None, label: str = "Ridge") -> str:
+    if score is None or base_score is None:
         return "no comparison"
-    delta = score - ridge_score
+    delta = score - base_score
     if abs(delta) < 0.05:
-        return "same as Ridge"
+        return f"same as {label}"
     sign = "+" if delta > 0 else "-"
-    return f"{sign}{abs(delta):.1f} vs Ridge"
+    return f"{sign}{abs(delta):.1f} vs {label}"
 
+@app.post("/analyze")
+async def analyze_image(
+    image: UploadFile = File(...),
+    model_version: str = Form("round3") # "round3" is default latest baseline
+):
+    temp_dir = tempfile.mkdtemp()
+    temp_file_path = Path(temp_dir) / "upload_image"
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        
+        # Dynamically verify if environment provider resolves correctly
+        from face_similarity.embedding import resolve_providers
+        try:
+            _, active_provider = resolve_providers("auto")
+        except Exception:
+            active_provider = "cpu"
 
-def decision_text(score: float | None) -> tuple[str, str, str]:
-    if score is None:
-        return "--", "no score", ""
-    if score >= SWIPE_THRESHOLD:
-        return "RIGHT", f"+{score - SWIPE_THRESHOLD:.1f} over threshold", "right"
-    return "LEFT", f"{SWIPE_THRESHOLD - score:.1f} under threshold", "left"
+        # 1. Determine configuration store & metadata settings
+        mv_lower = model_version.lower()
+        is_experimental = mv_lower in EXPERIMENTAL_SETUPS
+        if is_experimental:
+            setup = EXPERIMENTAL_SETUPS[mv_lower]
+            store_path = setup.store
+            k_val = setup.k
+            model_display_name = setup.setup_name
+        else:
+            if mv_lower not in BASE_MODELS_CONFIG:
+                mv_lower = "round3"
+            cfg = BASE_MODELS_CONFIG[mv_lower]
+            store_path = cfg["store"]
+            k_val = TOP_K
+            model_display_name = cfg["name"]
 
+        store = cached_store(store_path)
+        if store is None:
+            raise HTTPException(status_code=500, detail=f"Reference store not found: {store_path}")
+        
+        # 2. Extract Face Embedding
+        try:
+            embedding = get_face_embedding(
+                str(temp_file_path),
+                model_name=store.model_name,
+                provider=active_provider,
+                det_size=store.det_size,
+                det_thresh=store.det_thresh,
+                enforce_detection=True,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Face detection failed: {str(exc)}")
 
-with gr.Blocks(title="BumbleClaw") as demo:
-    with gr.Column(elem_id="app-shell"):
-        gr.Markdown("# BumbleClaw", elem_id="title")
-        with gr.Row():
-            with gr.Column(scale=3):
-                image_input = gr.Image(
-                    type="filepath",
-                    label="Upload",
-                    show_label=False,
-                    height=520,
-                    elem_id="image-input",
+        # 3. Score Nearest Neighbors (KNN)
+        result = score_embedding(embedding, store.embeddings, store.ratings, k=k_val)
+        
+        # 4. Pre-extract CLIP Embedding (using round3 as baseline configuration model metadata)
+        clip_embedding = None
+        r3_multi = cached_regressor(BASE_MODELS_CONFIG["round3"]["multimodal"])
+        if r3_multi is not None:
+            try:
+                clip_model = r3_multi.metadata.get("clip_model", "openai/clip-vit-base-patch32")
+                clip_embedding = get_clip_embedding(str(temp_file_path), model_name=clip_model, provider=active_provider)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+
+        # 5. Compute base scoring epochs for comparison loops
+        base_scores = {}
+        for key, cfg in BASE_MODELS_CONFIG.items():
+            ridge_score = None
+            multi_score = None
+            blended_score = None
+
+            reg = cached_regressor(cfg["regressor"])
+            if reg is not None:
+                ridge_score = float(predict_rating(reg, embedding))
+            
+            multi = cached_regressor(cfg["multimodal"])
+            if multi is not None and clip_embedding is not None:
+                try:
+                    multi_score = float(predict_multimodal_rating(
+                        multi,
+                        face_embedding=embedding,
+                        clip_embedding=clip_embedding,
+                    ))
+                    blended_score = float(biased_multimodal_score(ridge_score, multi_score, face_weight=cfg["face_weight"]))
+                except Exception:
+                    pass
+            
+            if blended_score is None:
+                blended_score = ridge_score if ridge_score is not None else float(result.rating)
+
+            base_scores[key] = {
+                "ridge": ridge_score,
+                "multimodal": multi_score,
+                "blended": blended_score,
+                "face_weight": cfg["face_weight"]
+            }
+
+        # 6. Evaluate selected model path details
+        preference_probability_val = None
+        preference_threshold_val = None
+        is_preference_decision = False
+
+        if is_experimental:
+            setup = EXPERIMENTAL_SETUPS[model_version]
+            
+            # Predict ridge & multimodal on the setup's regressors
+            setup_ridge = None
+            setup_reg = cached_regressor(setup.regressor)
+            if setup_reg is not None:
+                setup_ridge = float(predict_rating(setup_reg, embedding))
+                
+            setup_multimodal = None
+            setup_multi = cached_regressor(setup.multimodal_regressor)
+            if setup_multi is not None and clip_embedding is not None:
+                try:
+                    setup_multimodal = float(predict_multimodal_rating(
+                        setup_multi,
+                        face_embedding=embedding,
+                        clip_embedding=clip_embedding,
+                    ))
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+            
+            setup_blended = biased_multimodal_score(setup_ridge, setup_multimodal, face_weight=setup.face_weight)
+            if setup_blended is None:
+                setup_blended = setup_ridge if setup_ridge is not None else float(result.rating)
+                
+            # Build Prediction model
+            from face_similarity.prediction import RatingPrediction
+            prediction_obj = RatingPrediction(
+                rating=setup_blended,
+                method=setup.method,
+                face_rating=setup_ridge,
+                multimodal_rating=setup_multimodal,
+                knn_rating=float(result.rating)
+            )
+
+            # Apply MultimodalX prediction adjustments if required
+            from face_similarity.multimodalx import METHODS as MULTIMODALX_METHODS
+            from face_similarity.multimodalx import prediction as multimodalx_prediction
+            old_p_like = None
+            if setup.method in MULTIMODALX_METHODS:
+                pref_path = setup.blend_preference_model or setup.preference_model
+                pref_model = cached_preference_model(pref_path)
+                if pref_model is not None:
+                    from face_similarity.multimodalx import PREFERENCE_FEATURE_THRESHOLD as MULTIMODALX_PREFERENCE_FEATURE_THRESHOLD
+                    from face_similarity.multimodalx import old_p_like_face_weight as multimodalx_old_p_like_face_weight
+                    features = features_from_prediction(
+                        prediction_obj,
+                        threshold=MULTIMODALX_PREFERENCE_FEATURE_THRESHOLD,
+                        face_weight=multimodalx_old_p_like_face_weight(setup.method, setup.face_weight),
+                        regressor_path=setup.regressor,
+                        multimodal_regressor_path=setup.multimodal_regressor
+                    )
+                    old_p_like = preference_probability(pref_model, features)
+                    prediction_obj = multimodalx_prediction(prediction_obj, old_p_like, method=setup.method)
+                    setup_blended = prediction_obj.rating
+
+            # Score Preference/Veto Layer
+            pref_model = cached_preference_model(setup.preference_model)
+            if pref_model is not None:
+                features = features_from_prediction(
+                    prediction_obj,
+                    threshold=setup.threshold,
+                    face_weight=setup.face_weight,
+                    regressor_path=setup.regressor,
+                    multimodal_regressor_path=setup.multimodal_regressor
                 )
-            with gr.Column(scale=2):
-                scores = gr.HTML(value=empty_scores())
-                details = gr.Markdown(elem_id="nearest-panel")
+                if old_p_like is not None:
+                    features["old_p_like"] = old_p_like
+                preference_probability_val = preference_probability(pref_model, features)
+                preference_threshold_val = setup.preference_threshold
+            
+            primary_ridge = setup_ridge
+            primary_multimodal = setup_multimodal
+            primary_face_weight = setup.face_weight
 
-        image_input.change(analyze, inputs=image_input, outputs=[scores, details])
+            if setup.decision_mode == "preference" and preference_probability_val is not None:
+                is_preference_decision = True
+                primary_score = preference_probability_val * 100.0  # Scale to 0-100%
+                active_threshold = preference_threshold_val * 100.0
+                decision = "RIGHT" if preference_probability_val >= preference_threshold_val else "LEFT"
+            else:
+                primary_score = setup_blended
+                active_threshold = setup.threshold
+                decision = "RIGHT" if setup_blended >= setup.threshold else "LEFT"
+            base_score = setup_blended
+        else:
+            # Baseline Regressor Config selected
+            primary_score = base_scores[model_version]["blended"]
+            primary_ridge = base_scores[model_version]["ridge"]
+            primary_multimodal = base_scores[model_version]["multimodal"]
+            primary_face_weight = BASE_MODELS_CONFIG[model_version]["face_weight"]
+            active_threshold = SWIPE_THRESHOLD
+            decision = "RIGHT" if primary_score >= SWIPE_THRESHOLD else "LEFT"
+            base_score = primary_score
 
+        # Determine formula description
+        if is_experimental:
+            setup = EXPERIMENTAL_SETUPS[model_version]
+            if setup.method == "multimodalx":
+                formula_description = "73% Ridge + 20% Multimodal + 7% P(like)"
+            elif setup.method == "multimodalx2":
+                formula_description = "12% Ridge + 5% Multimodal + 53% P(like) + 30% KNN"
+            elif setup.method == "multimodalx5":
+                formula_description = "60% Ridge + 5% Multimodal + 15% P(like) + 20% KNN"
+            elif setup.method == "multimodalx_original":
+                formula_description = "48% Ridge + 48% Multimodal + 4% P(like)"
+            else:
+                formula_description = f"{int(setup.face_weight * 100)}% Ridge + {int((1 - setup.face_weight) * 100)}% Multimodal"
+        else:
+            face_weight = BASE_MODELS_CONFIG[model_version]["face_weight"]
+            formula_description = f"{int(face_weight * 100)}% Ridge + {int((1 - face_weight) * 100)}% Multimodal"
+
+        threshold_diff = primary_score - active_threshold
+
+        # Comparison strings vs Primary Ridge baseline
+        comparison_texts = {
+            "face_biased": comparison_text(base_score, primary_ridge, "Ridge"),
+            "multimodal": comparison_text(primary_multimodal, primary_ridge, "Ridge"),
+            "knn": comparison_text(float(result.rating), primary_ridge, "Ridge")
+        }
+        for key, sc in base_scores.items():
+            comparison_texts[f"{key}_face_biased"] = comparison_text(sc["blended"], primary_ridge, "Ridge")
+
+        nearest_refs = []
+        for index, similarity in zip(result.nearest_indices, result.nearest_similarities):
+            nearest_refs.append({
+                "name": Path(store.paths[index]).name,
+                "rating": float(store.ratings[index]),
+                "similarity": float(similarity)
+            })
+
+        return {
+            "success": True,
+            "decision": decision,
+            "primary_score": primary_score,
+            "threshold": active_threshold,
+            "threshold_diff": threshold_diff,
+            "model_version": mv_lower,
+            "model_display_name": model_display_name,
+            "formula_description": formula_description,
+            "primary_face_weight": primary_face_weight,
+            "primary_k": k_val,
+            "is_preference_mode": is_preference_decision,
+            "base_score": base_score,
+            "scores": {
+                "face_biased": base_score,
+                "ridge": primary_ridge,
+                "multimodal": primary_multimodal,
+                "knn": float(result.rating),
+                "preference_probability": preference_probability_val,
+                "preference_threshold": preference_threshold_val,
+                **{f"{key}_face_biased": sc["blended"] for key, sc in base_scores.items()}
+            },
+            "comparison_text": comparison_texts,
+            "details": {
+                "max_similarity": float(result.max_similarity),
+                "mean_similarity": float(result.mean_similarity),
+                "references_count": len(store.embeddings)
+            },
+            "nearest_references": nearest_refs
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=SERVER_PORT, share=False, css=CSS)
+    # Check if running outside of local .venv virtualenv
+    is_venv = os.environ.get("VIRTUAL_ENV") or hasattr(sys, "real_prefix") or (sys.base_prefix != sys.prefix)
+    if not is_venv:
+        print("\n" + "="*80)
+        print("WARNING: You are NOT running in the project's local virtual environment (.venv)!")
+        print("InsightFace and ONNX Runtime might fail to load DLLs due to dependency mismatches.")
+        print("Please run the app using:")
+        print("   .\\.venv\\Scripts\\python.exe app.py")
+        print("="*80 + "\n")
+        raise SystemExit(f"Current Python: {sys.executable}")
+        
+    print(f"Starting BumbleClaw Image Analysis API on port {SERVER_PORT}...")
+    uvicorn.run("app:app", host="0.0.0.0", port=SERVER_PORT, reload=False)

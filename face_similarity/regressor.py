@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -24,6 +25,7 @@ def load_regressor(path: str | Path = DEFAULT_REGRESSOR_PATH) -> RatingRegressor
     if not model_path.exists():
         raise FileNotFoundError(f"Regressor model does not exist: {model_path}")
 
+    _register_legacy_estimators()
     payload = joblib.load(model_path)
     if not isinstance(payload, dict) or "estimator" not in payload:
         raise ValueError(f"Invalid regressor model file: {model_path}")
@@ -91,3 +93,14 @@ def _import_joblib() -> Any:
     except ImportError as exc:
         raise ImportError("joblib is required. Run: pip install -r requirements.txt") from exc
     return joblib
+
+
+def _register_legacy_estimators() -> None:
+    main_module = sys.modules.get("__main__")
+    if main_module is None or hasattr(main_module, "ExpectedScoreClassifier"):
+        return
+
+    # Older multimodal model files were serialized from the training script entrypoint.
+    from train_multimodal_regressor import ExpectedScoreClassifier
+
+    main_module.ExpectedScoreClassifier = ExpectedScoreClassifier

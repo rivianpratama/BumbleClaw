@@ -4,6 +4,7 @@ import argparse
 import os
 import random
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +17,13 @@ from face_similarity.prediction import (
 )
 from face_similarity.clip_runtime import ensure_clip_runtime
 from face_similarity.cli_pause import pause_if_requested
-from face_similarity.automation_log import DEFAULT_BUMBLE_LOG_DIR, DEFAULT_LOG_FORMAT, LOG_FORMATS, save_profile_log
+from face_similarity.automation_log import (
+    DEFAULT_BUMBLE_LOG_DIR,
+    DEFAULT_LOG_FORMAT,
+    LOG_FORMATS,
+    save_compressed_image,
+    save_profile_log,
+)
 from face_similarity.dynamic_threshold import (
     ADAPTIVE_ROLLING_MODE,
     LOG_MODE,
@@ -26,7 +33,7 @@ from face_similarity.dynamic_threshold import (
     effective_value_threshold,
     percentile_to_target_right_rate,
 )
-from face_similarity.experimental_setup import EXPERIMENTAL_SETUPS
+from face_similarity.experimental_setup import AUTOMATION_SETUPS
 from face_similarity.multimodalx import (
     METHODS as MULTIMODALX_METHODS,
     PREFERENCE_FEATURE_THRESHOLD as MULTIMODALX_PREFERENCE_FEATURE_THRESHOLD,
@@ -174,7 +181,7 @@ class IterationResult:
 def parse_args(argv: list[str] | None = None) -> AutomationConfig:
     raw_argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Score the visible Bumble Web profile and press left or right.")
-    parser.add_argument("--setup", choices=tuple(EXPERIMENTAL_SETUPS), help="Named automation setup")
+    parser.add_argument("--setup", choices=tuple(AUTOMATION_SETUPS), help="Named automation setup")
     parser.add_argument("--store", default=DEFAULT_STORE, help="Reference store path")
     parser.add_argument("--regressor", default=DEFAULT_REGRESSOR_PATH, help="Face-only regressor path")
     parser.add_argument("--multimodal-regressor", default=DEFAULT_MULTIMODAL_REGRESSOR_PATH, help="Multimodal regressor path")
@@ -283,7 +290,7 @@ def parse_args(argv: list[str] | None = None) -> AutomationConfig:
     dynamic_preference_mode = LOG_MODE if args.dynamic_preference_from_logs else ADAPTIVE_ROLLING_MODE if args.adaptive_dynamic_preference_rolling else ROLLING_MODE
 
     return AutomationConfig(
-        setup_name=EXPERIMENTAL_SETUPS[args.setup].setup_name if args.setup else "",
+        setup_name=AUTOMATION_SETUPS[args.setup].setup_name if args.setup else "",
         store_path=Path(args.store),
         regressor_path=Path(args.regressor),
         multimodal_regressor_path=Path(args.multimodal_regressor),
@@ -325,7 +332,7 @@ def parse_args(argv: list[str] | None = None) -> AutomationConfig:
 def apply_setup_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     if not args.setup:
         return
-    setup = EXPERIMENTAL_SETUPS[args.setup]
+    setup = AUTOMATION_SETUPS[args.setup]
     set_if_missing(args, raw_argv, "store", ["--store"], setup.store)
     set_if_missing(args, raw_argv, "regressor", ["--regressor"], setup.regressor)
     set_if_missing(args, raw_argv, "multimodal_regressor", ["--multimodal-regressor"], setup.multimodal_regressor)
@@ -358,7 +365,7 @@ def apply_setup_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> N
 def setup_blend_preference_model_path(setup_name: str | None) -> Path | None:
     if not setup_name:
         return None
-    path = EXPERIMENTAL_SETUPS[setup_name].blend_preference_model
+    path = AUTOMATION_SETUPS[setup_name].blend_preference_model
     return Path(path) if path else None
 
 
@@ -478,6 +485,46 @@ def score_screenshot(
     )
 
 
+def score_iteration_screenshot(
+    config: AutomationConfig,
+    store: ReferenceStore,
+    *,
+    face_regressor: RatingRegressor | None,
+    multimodal_regressor: RatingRegressor | None,
+) -> RatingPrediction:
+    if config.setup_name != "Experimental3":
+        return score_screenshot(
+            config.screenshot_path,
+            store,
+            k=config.k,
+            provider=config.provider,
+            method=config.method,
+            face_weight=config.face_weight,
+            face_regressor=face_regressor,
+            multimodal_regressor=multimodal_regressor,
+        )
+
+    with tempfile.TemporaryDirectory() as directory:
+        logged_image = Path(directory) / f"score_input.{config.log_format}"
+        save_compressed_image(
+            config.screenshot_path,
+            logged_image,
+            quality=config.log_quality,
+            max_width=config.log_max_width,
+            image_format=config.log_format,
+        )
+        return score_screenshot(
+            logged_image,
+            store,
+            k=config.k,
+            provider=config.provider,
+            method=config.method,
+            face_weight=config.face_weight,
+            face_regressor=face_regressor,
+            multimodal_regressor=multimodal_regressor,
+        )
+
+
 def log_config(
     config: AutomationConfig,
     *,
@@ -588,13 +635,9 @@ def perform_iteration(
     config.screenshot_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         page.screenshot(path=str(config.screenshot_path), full_page=False)
-        prediction = score_screenshot(
-            config.screenshot_path,
+        prediction = score_iteration_screenshot(
+            config,
             store,
-            k=config.k,
-            provider=config.provider,
-            method=config.method,
-            face_weight=config.face_weight,
             face_regressor=face_regressor,
             multimodal_regressor=multimodal_regressor,
         )
@@ -618,7 +661,6 @@ def perform_iteration(
                     is_retry=True,
                 )
             
-            print(f"[{iteration}] No face detected on retry. Swiping left.")
             prediction = RatingPrediction(
                 rating=0.0,
                 method=config.method,
@@ -638,6 +680,19 @@ def perform_iteration(
                 image_format=config.log_format,
                 config=log_config(config, threshold=threshold),
             )
+            score_signature = prediction_signature(prediction)
+            if score_signature == previous_score_signature:
+                return IterationResult(
+                    iteration=iteration,
+                    scrolled=scrolled,
+                    rating=prediction.rating,
+                    screenshot=str(logged_path),
+                    key=key,
+                    threshold=threshold,
+                    score_signature=score_signature,
+                    stop_reason="Score is identical to previous screenshot",
+                )
+            print(f"[{iteration}] No face detected on retry. Swiping left.")
             page.keyboard.press(key)
             return IterationResult(
                 iteration=iteration,
@@ -646,7 +701,7 @@ def perform_iteration(
                 screenshot=str(logged_path),
                 key=key,
                 threshold=threshold,
-                score_signature=prediction_signature(prediction),
+                score_signature=score_signature,
             )
 
         return IterationResult(

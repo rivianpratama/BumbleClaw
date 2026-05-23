@@ -438,11 +438,13 @@ Dynamic threshold flags can operate on raw score history or on preference-probab
 
 ## Dashboard And Inspection
 
-Open the original Gradio scoring UI:
+Start the Python analysis API used by the dashboard sandbox:
 
 ```powershell
-python app.py
+.\.venv\Scripts\python.exe app.py
 ```
+
+Use the configured CLIP venv instead when the sandbox should compute CLIP-backed multimodal scores.
 
 Run the local Next.js dashboard:
 

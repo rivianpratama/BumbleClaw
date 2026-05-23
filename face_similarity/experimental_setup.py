@@ -2,10 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+ORIGINAL_NAME = "Original"
+ORIGINAL_SETUP = "original"
+ROUND1_NAME = "Round1"
+ROUND1_SETUP = "round1"
+ROUND2_NAME = "Round2"
+ROUND2_SETUP = "round2"
+ROUND3_NAME = "Round3"
+ROUND3_SETUP = "round3"
 EXPERIMENTAL1_NAME = "Experimental1"
 EXPERIMENTAL1_SETUP = "experimental1"
 EXPERIMENTAL2_NAME = "Experimental2"
 EXPERIMENTAL2_SETUP = "experimental2"
+EXPERIMENTAL3_NAME = "Experimental3"
+EXPERIMENTAL3_SETUP = "experimental3"
 MULTIMODALX_NAME = "MultimodalX"
 MULTIMODALX_SETUP = "multimodalx"
 MULTIMODALX2_NAME = "MultimodalX2"
@@ -48,6 +58,82 @@ class ExperimentalSetup:
     k: int = 11
 
 
+ORIGINAL = ExperimentalSetup(
+    setup_name=ORIGINAL_NAME,
+    store="embeddings/reference_store.npz",
+    regressor="models/rating_regressor.joblib",
+    multimodal_regressor="models/rating_regressor_multimodal.joblib",
+    method="face_biased",
+    face_weight=0.50,
+    threshold=55.0,
+    decision_mode="threshold",
+    preference_model="models/bumble_preference_classifier.joblib",
+    preference_threshold=0.558638,
+    dynamic_preference_mode="",
+    dynamic_preference_percentile=80.0,
+    dynamic_preference_window=200,
+    dynamic_preference_min_history=50,
+    dynamic_preference_min_threshold=0.45,
+    dynamic_preference_max_threshold=0.75,
+)
+
+ROUND1 = ExperimentalSetup(
+    setup_name=ROUND1_NAME,
+    store="embeddings/reference_store_bumble_combined.npz",
+    regressor="models/rating_regressor_bumble_combined.joblib",
+    multimodal_regressor="models/rating_regressor_multimodal_bumble_combined.joblib",
+    method="face_biased",
+    face_weight=0.50,
+    threshold=55.0,
+    decision_mode="threshold",
+    preference_model="models/bumble_preference_classifier.joblib",
+    preference_threshold=0.558638,
+    dynamic_preference_mode="",
+    dynamic_preference_percentile=80.0,
+    dynamic_preference_window=200,
+    dynamic_preference_min_history=50,
+    dynamic_preference_min_threshold=0.45,
+    dynamic_preference_max_threshold=0.75,
+)
+
+ROUND2 = ExperimentalSetup(
+    setup_name=ROUND2_NAME,
+    store="embeddings/reference_store_bumble_combined_round2.npz",
+    regressor="models/rating_regressor_bumble_combined_round2.joblib",
+    multimodal_regressor="models/rating_regressor_multimodal_bumble_combined_round2.joblib",
+    method="face_biased",
+    face_weight=0.22,
+    threshold=55.0,
+    decision_mode="threshold",
+    preference_model="models/bumble_preference_classifier.joblib",
+    preference_threshold=0.558638,
+    dynamic_preference_mode="",
+    dynamic_preference_percentile=80.0,
+    dynamic_preference_window=200,
+    dynamic_preference_min_history=50,
+    dynamic_preference_min_threshold=0.45,
+    dynamic_preference_max_threshold=0.75,
+)
+
+ROUND3 = ExperimentalSetup(
+    setup_name=ROUND3_NAME,
+    store="embeddings/reference_store_bumble_combined_round3.npz",
+    regressor="models/rating_regressor_bumble_combined_round3.joblib",
+    multimodal_regressor="models/rating_regressor_multimodal_bumble_combined_round3.joblib",
+    method="face_biased",
+    face_weight=0.44,
+    threshold=55.0,
+    decision_mode="threshold",
+    preference_model="models/bumble_preference_classifier.joblib",
+    preference_threshold=0.558638,
+    dynamic_preference_mode="",
+    dynamic_preference_percentile=80.0,
+    dynamic_preference_window=200,
+    dynamic_preference_min_history=50,
+    dynamic_preference_min_threshold=0.45,
+    dynamic_preference_max_threshold=0.75,
+)
+
 EXPERIMENTAL1 = ExperimentalSetup(
     setup_name=EXPERIMENTAL1_NAME,
     store="embeddings/reference_store_bumble_combined_round2.npz",
@@ -84,6 +170,31 @@ EXPERIMENTAL2 = ExperimentalSetup(
     dynamic_preference_min_history=50,
     dynamic_preference_min_threshold=0.45,
     dynamic_preference_max_threshold=0.75,
+)
+
+EXPERIMENTAL3 = ExperimentalSetup(
+    setup_name=EXPERIMENTAL3_NAME,
+    store="embeddings/reference_store.npz",
+    regressor="models/rating_regressor.joblib",
+    multimodal_regressor="models/rating_regressor_multimodal.joblib",
+    method="multimodalx_original",
+    face_weight=0.50,
+    threshold=67.342307,
+    decision_mode="threshold",
+    preference_model="models/bumble_preference_classifier.joblib",
+    preference_threshold=0.558638,
+    dynamic_preference_mode="",
+    dynamic_preference_percentile=80.0,
+    dynamic_preference_window=200,
+    dynamic_preference_min_history=50,
+    dynamic_preference_min_threshold=0.45,
+    dynamic_preference_max_threshold=0.75,
+    dynamic_mode="from_logs",
+    dynamic_percentile=80.0,
+    dynamic_window=200,
+    dynamic_min_history=20,
+    dynamic_min_threshold=48.0,
+    dynamic_max_threshold=85.0,
 )
 
 MULTIMODALX = ExperimentalSetup(
@@ -238,10 +349,19 @@ MULTIMODALX6 = ExperimentalSetup(
 EXPERIMENTAL_SETUPS = {
     EXPERIMENTAL1_SETUP: EXPERIMENTAL1,
     EXPERIMENTAL2_SETUP: EXPERIMENTAL2,
+    EXPERIMENTAL3_SETUP: EXPERIMENTAL3,
     MULTIMODALX_SETUP: MULTIMODALX,
     MULTIMODALX2_SETUP: MULTIMODALX2,
     MULTIMODALX3_SETUP: MULTIMODALX3,
     MULTIMODALX4_SETUP: MULTIMODALX4,
     MULTIMODALX5_SETUP: MULTIMODALX5,
     MULTIMODALX6_SETUP: MULTIMODALX6,
+}
+
+AUTOMATION_SETUPS = {
+    ORIGINAL_SETUP: ORIGINAL,
+    ROUND1_SETUP: ROUND1,
+    ROUND2_SETUP: ROUND2,
+    ROUND3_SETUP: ROUND3,
+    **EXPERIMENTAL_SETUPS,
 }

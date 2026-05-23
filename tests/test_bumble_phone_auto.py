@@ -97,6 +97,53 @@ class BumblePhoneAutoTests(unittest.TestCase):
         self.assertEqual(cfg.preference_model_path, Path("models/custom.joblib"))
         self.assertEqual(cfg.preference_threshold, 0.42)
 
+    def test_parse_args_supports_base_generation_setups(self) -> None:
+        setups = {
+            "original": (
+                "Original",
+                "embeddings/reference_store.npz",
+                "models/rating_regressor.joblib",
+                "models/rating_regressor_multimodal.joblib",
+                0.50,
+            ),
+            "round1": (
+                "Round1",
+                "embeddings/reference_store_bumble_combined.npz",
+                "models/rating_regressor_bumble_combined.joblib",
+                "models/rating_regressor_multimodal_bumble_combined.joblib",
+                0.50,
+            ),
+            "round2": (
+                "Round2",
+                "embeddings/reference_store_bumble_combined_round2.npz",
+                "models/rating_regressor_bumble_combined_round2.joblib",
+                "models/rating_regressor_multimodal_bumble_combined_round2.joblib",
+                0.22,
+            ),
+            "round3": (
+                "Round3",
+                "embeddings/reference_store_bumble_combined_round3.npz",
+                "models/rating_regressor_bumble_combined_round3.joblib",
+                "models/rating_regressor_multimodal_bumble_combined_round3.joblib",
+                0.44,
+            ),
+        }
+
+        for setup, expected in setups.items():
+            with self.subTest(setup=setup):
+                cfg = bumble_phone_auto.parse_args(["--setup", setup, "--loop", "--delay", "0"])
+
+                self.assertEqual(cfg.setup_name, expected[0])
+                self.assertEqual(cfg.store_path, Path(expected[1]))
+                self.assertEqual(cfg.regressor_path, Path(expected[2]))
+                self.assertEqual(cfg.multimodal_regressor_path, Path(expected[3]))
+                self.assertAlmostEqual(cfg.face_weight, expected[4])
+                self.assertEqual(cfg.method, "face_biased")
+                self.assertEqual(cfg.decision_mode, "threshold")
+                self.assertAlmostEqual(cfg.threshold, 55.0)
+                self.assertFalse(cfg.dynamic_threshold)
+                self.assertFalse(cfg.dynamic_preference_threshold)
+
     def test_parse_args_supports_experimental1_setup(self) -> None:
         cfg = bumble_phone_auto.parse_args(["--setup", "experimental1", "--loop", "--delay", "0"])
 
@@ -142,6 +189,22 @@ class BumblePhoneAutoTests(unittest.TestCase):
         self.assertAlmostEqual(cfg.dynamic_preference_target_right_rate, 0.20)
         self.assertAlmostEqual(cfg.dynamic_preference_min_threshold, 0.45)
         self.assertAlmostEqual(cfg.dynamic_preference_max_threshold, 0.75)
+
+    def test_parse_args_supports_experimental3_setup(self) -> None:
+        cfg = bumble_phone_auto.parse_args(["--setup", "experimental3", "--loop", "--delay", "0"])
+
+        self.assertEqual(cfg.setup_name, "Experimental3")
+        self.assertEqual(cfg.store_path, Path("embeddings/reference_store.npz"))
+        self.assertEqual(cfg.regressor_path, Path("models/rating_regressor.joblib"))
+        self.assertEqual(cfg.multimodal_regressor_path, Path("models/rating_regressor_multimodal.joblib"))
+        self.assertEqual(cfg.method, "multimodalx_original")
+        self.assertAlmostEqual(cfg.face_weight, 0.50)
+        self.assertAlmostEqual(cfg.threshold, 67.342307)
+        self.assertEqual(cfg.decision_mode, "threshold")
+        self.assertEqual(cfg.preference_model_path, Path("models/bumble_preference_classifier.joblib"))
+        self.assertTrue(cfg.dynamic_threshold)
+        self.assertAlmostEqual(cfg.dynamic_target_right_rate, 0.20)
+        self.assertFalse(cfg.dynamic_preference_threshold)
 
     def test_parse_args_supports_multimodalx_setup(self) -> None:
         cfg = bumble_phone_auto.parse_args(["--setup", "multimodalx", "--loop", "--delay", "0"])
@@ -726,6 +789,33 @@ class BumblePhoneAutoTests(unittest.TestCase):
         self.assertAlmostEqual(blended.rating, 49.4)
         self.assertAlmostEqual(probability, 0.60)
 
+    def test_experimental3_scores_log_domain_proxy(self) -> None:
+        cfg = bumble_phone_auto.PhoneAutomationConfig(
+            **{
+                **config().__dict__,
+                "setup_name": "Experimental3",
+                "log_quality": 50,
+                "log_max_width": 720,
+            }
+        )
+        prediction = RatingPrediction(34.0, "face_biased", 30.0, 38.0, 42.0)
+
+        with patch("bumble_phone_auto.save_compressed_image") as compress:
+            with patch("bumble_phone_auto.score_screenshot", return_value=prediction) as score:
+                result = bumble_phone_auto.score_iteration_screenshot(
+                    cfg,
+                    SimpleNamespace(),
+                    face_regressor=SimpleNamespace(),
+                    multimodal_regressor=SimpleNamespace(),
+                )
+
+        self.assertEqual(result, prediction)
+        compress.assert_called_once()
+        self.assertEqual(compress.call_args.args[0], cfg.screenshot_path)
+        self.assertEqual(compress.call_args.kwargs["quality"], 50)
+        self.assertEqual(compress.call_args.kwargs["max_width"], 720)
+        self.assertNotEqual(score.call_args.args[0], cfg.screenshot_path)
+
     def test_score_multimodalx2_includes_knn_blend(self) -> None:
         cfg = bumble_phone_auto.PhoneAutomationConfig(**{**config().__dict__, "method": "multimodalx2"})
         prediction = RatingPrediction(
@@ -741,6 +831,25 @@ class BumblePhoneAutoTests(unittest.TestCase):
 
         self.assertEqual(blended.method, "multimodalx2")
         self.assertAlmostEqual(blended.rating, 58.6)
+        self.assertAlmostEqual(probability, 0.60)
+
+    def test_score_original_multimodalx_keeps_equal_original_core(self) -> None:
+        cfg = bumble_phone_auto.PhoneAutomationConfig(
+            **{**config().__dict__, "method": "multimodalx_original", "face_weight": 0.50}
+        )
+        prediction = RatingPrediction(
+            rating=60.0,
+            method="face_biased",
+            face_rating=40.0,
+            multimodal_rating=80.0,
+            knn_rating=60.0,
+        )
+
+        with patch("bumble_phone_auto.preference_probability", return_value=0.60):
+            blended, probability = bumble_phone_auto.score_multimodalx(prediction, cfg, SimpleNamespace())
+
+        self.assertEqual(blended.method, "multimodalx_original")
+        self.assertAlmostEqual(blended.rating, 60.0)
         self.assertAlmostEqual(probability, 0.60)
 
     def test_score_multimodalx5_uses_p80_tuned_blend(self) -> None:
@@ -834,6 +943,27 @@ class BumblePhoneAutoTests(unittest.TestCase):
 
         self.assertEqual(result.stop_reason, "Score is identical to previous screenshot")
         self.assertEqual(result.screenshot, "logged.jpg")
+        swipe.assert_not_called()
+
+    def test_perform_iteration_stops_on_repeated_no_face_zero_score(self) -> None:
+        cfg = config()
+
+        with patch("bumble_phone_auto.capture_screen"):
+            with patch("bumble_phone_auto.score_screenshot", side_effect=ValueError("No face detected")):
+                with patch("bumble_phone_auto.time.sleep"):
+                    with patch("bumble_phone_auto.save_profile_log", return_value=Path("logged.webp")):
+                        with patch("bumble_phone_auto.swipe_phone") as swipe:
+                            result = bumble_phone_auto.perform_iteration(
+                                cfg,
+                                SimpleNamespace(),
+                                2,
+                                face_regressor=SimpleNamespace(),
+                                multimodal_regressor=SimpleNamespace(),
+                                previous_score_signature=("0.0000", "", "", "0.0000"),
+                            )
+
+        self.assertEqual(result.stop_reason, "Score is identical to previous screenshot")
+        self.assertEqual(result.rating, 0.0)
         swipe.assert_not_called()
 
     def test_loop_repeats_after_success_and_stops_on_failure(self) -> None:

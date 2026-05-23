@@ -211,7 +211,7 @@ class BumblePreferenceTests(unittest.TestCase):
         self.assertEqual(reader.fieldnames, bumble_preference.VETO_MANIFEST_FIELDS)
         self.assertEqual(rows[0]["disagreement_pattern"], "RLLR")
 
-    def test_veto_layer_rows_build_round2_round3_and_multimodalx2_feature_rows(self) -> None:
+    def test_veto_layer_rows_build_original_round2_round3_and_multimodalx2_feature_rows(self) -> None:
         manifest = [
             {
                 "timestamp": "1",
@@ -242,10 +242,15 @@ class BumblePreferenceTests(unittest.TestCase):
             }
         ]
 
+        original = bumble_preference.veto_layer_rows(manifest, components, lane="Original")
         round2 = bumble_preference.veto_layer_rows(manifest, components, lane="Round2")
         round3 = bumble_preference.veto_layer_rows(manifest, components, lane="Round3")
         multimodalx2 = bumble_preference.veto_layer_rows(manifest, components, lane="MultimodalX2")
 
+        self.assertEqual(original[0]["score"], "60.000000")
+        self.assertEqual(original[0]["face_weight"], "0.500000")
+        self.assertEqual(original[0]["action"], "right")
+        self.assertEqual(original[0]["threshold"], "55.000000")
         self.assertEqual(round2[0]["score"], "52.000000")
         self.assertEqual(round2[0]["knn"], "70.000000")
         self.assertEqual(round2[0]["face_weight"], "0.300000")
